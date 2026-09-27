@@ -17,6 +17,13 @@ The bottom bar switches between three areas:
   - **Collection value** per set: copies owned × each variant's market price (TCGplayer, USD). Variants that only have Cardmarket prices, which is common for Japanese cards, are totalled separately in EUR rather than converted. Prices for owned cards are fetched when you open the set and cached for 24 hours. Each set's value shows in the set list and on Home, and Home adds them all up.
   - Special subsets have their own filter and progress bar, such as 30th Celebration's **30 Pikachu** (#023–052). The 30th Classic Collection is tracked as its own set.
   - Links to the set's PokeCottage card list and master-set guide.
+- **Card gallery** (beta): collection sets open as a gallery of big card pictures, three across. Owned cards are in full colour with a copy count and a holo sheen on foils; missing ones are greyed out. The ▦/☰ button switches between gallery and list (remembered). Tap a card for a full-screen view: swipe between cards, and tilt the phone to turn the card in 3D with a moving glare and a rainbow holo shimmer. Version buttons under the card add or remove copies.
+- **Inventory** (beta; its own tab and a Home shortcut): cards and sealed product held to sell or trade, kept apart from the collection.
+  - *Add* → **Card** (search TCGplayer, price included), **Sealed** (pick a set, then one of its products) or **By hand**.
+  - Each item has a quantity, cost each, condition (NM–DMG) or grade, version, asking price, where it's kept, notes, and a status: In stock, Listed or Sold. *Mark sold…* records the price; selling part of a stack keeps the rest in stock.
+  - The summary shows units in stock, market value and profit on paper, plus units sold, revenue and realized profit. ↻ updates market prices from TCGplayer.
+  - Search by name, set, number or location; filter by status and cards/sealed; switch to the gallery view.
+  - Saved in `files/inventory/inventory.json` with hourly rolling backups (last 20); a damaged file falls back to the newest backup.
 - **Card scanner** (Scan cards on Home, or the Scan button on the Collection tab): point the camera at a card, or tap *Photo* to scan a picture.
   - On-device text recognition (Google ML Kit, offline) reads the set code and number at the bottom of the card, e.g. "PBL EN 111/084" or Japanese "SV2a 025/165", and looks the card up. Older cards that only print "215/203" are matched by set size plus the card's name.
   - Photos get extra enlarged passes over the bottom strip and the bottom-left corner, where the small print is.
