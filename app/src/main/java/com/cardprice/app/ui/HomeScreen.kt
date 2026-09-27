@@ -71,6 +71,7 @@ fun HomeScreen(
     onOpenCalculator: () -> Unit,
     onOpenCollection: () -> Unit,
     onScan: () -> Unit,
+    onOpenInventory: () -> Unit,
     onSearch: () -> Unit,
     onOpenCollectionSet: (SetProgress) -> Unit,
     onOpenPurchaseSet: (String) -> Unit,
@@ -191,6 +192,15 @@ fun HomeScreen(
                     title = "Scan cards",
                     body = "Point your camera at a card to find it and add it to your collection.",
                     onClick = onScan,
+                )
+            }
+            item {
+                SectionTile(
+                    icon = AppIcons.Inventory,
+                    color = Color(0xFF8E5A2B),
+                    title = "Inventory",
+                    body = "Cards and sealed product you hold to sell or trade: cost, market value, profit.",
+                    onClick = onOpenInventory,
                 )
             }
             item {

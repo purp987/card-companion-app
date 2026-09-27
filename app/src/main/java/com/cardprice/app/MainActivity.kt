@@ -3,6 +3,9 @@ package com.cardprice.app
 import android.app.Application
 import android.net.Uri
 import android.os.Bundle
+import com.cardprice.app.ui.AppIcons
+import com.cardprice.app.ui.inventory.InventoryViewModel
+import com.cardprice.app.ui.inventory.InventoryScreen
 import com.cardprice.app.data.scan.ScanLog
 import com.cardprice.app.data.market.Load
 import com.cardprice.app.ui.collectionSetArt
@@ -69,12 +72,14 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
     HOME("home", "Home", Icons.Filled.Home),
     CALCULATOR("sets", "Calculator", Icons.Filled.ShoppingCart),
     COLLECTION("collection", "Collection", Icons.Filled.Star),
+    INVENTORY("inventory", "Inventory", AppIcons.Inventory),
 }
 
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
     private val collectionVm: CollectionViewModel by viewModels()
     private val catalogVm: CatalogViewModel by viewModels()
+    private val inventoryVm: InventoryViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -134,6 +139,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenCalculator = { nav.switchTab(Tab.CALCULATOR.route) },
                                 onOpenCollection = { nav.switchTab(Tab.COLLECTION.route) },
                                 onScan = { nav.navigate("scan") },
+                                onOpenInventory = { nav.switchTab(Tab.INVENTORY.route) },
                                 onSearch = { nav.navigate("search") },
                                 onOpenCollectionSet = { p ->
                                     nav.navigate(collectionSetRoute(p.language, p.setId, p.setName, p.art))
@@ -155,6 +161,9 @@ class MainActivity : ComponentActivity() {
                                 onDeleteCustomSet = viewModel::deleteCustomSet,
                                 onSelectLanguage = viewModel::selectLanguage,
                             )
+                        }
+                        composable(Tab.INVENTORY.route) {
+                            InventoryScreen(vm = inventoryVm, allSets = state.allSets)
                         }
                         composable(Tab.COLLECTION.route) {
                             CollectionHomeScreen(

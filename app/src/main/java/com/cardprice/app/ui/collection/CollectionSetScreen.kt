@@ -76,6 +76,11 @@ import com.cardprice.app.data.collection.PokeCottage
 import com.cardprice.app.data.collection.SetSubsets
 import com.cardprice.app.data.collection.SetValue
 import com.cardprice.app.data.scan.ScanMatcher
+import com.cardprice.app.ui.AppIcons
+import com.cardprice.app.ui.showcase.ShowcaseCard
+import com.cardprice.app.ui.showcase.ShowcaseRow
+import com.cardprice.app.ui.showcase.ShowcaseViewer
+import com.cardprice.app.ui.showcase.rememberGalleryMode
 import com.cardprice.app.ui.SetArt
 import com.cardprice.app.ui.display
 import com.cardprice.app.ui.formatCurrency
@@ -83,7 +88,7 @@ import com.cardprice.app.data.market.Load
 
 private enum class CardFilter(val label: String) { ALL("All"), MISSING("Missing"), OWNED("Owned") }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CollectionSetScreen(
     language: Language,
@@ -115,6 +120,10 @@ fun CollectionSetScreen(
     val subset = subsets.firstOrNull { it.label == subsetLabel }
     var query by rememberSaveable { mutableStateOf("") }
     var focusHandled by rememberSaveable { mutableStateOf(false) }
+    // Gallery (big card pictures) or the list with version buttons; remembered across visits.
+    var gallery by rememberGalleryMode("collection", default = true)
+    // Index into the shown cards of the one open full screen.
+    var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     val cards = (cardsState.cards as? Load.Ready)?.value
     LaunchedEffect(cards) { cards?.let(onCardsLoaded) }
     LaunchedEffect(cards) {
@@ -149,6 +158,12 @@ fun CollectionSetScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    IconButton(onClick = { gallery = !gallery }) {
+                        Icon(
+                            if (gallery) AppIcons.ViewList else AppIcons.GridView,
+                            contentDescription = if (gallery) "Show as list" else "Show as gallery",
+                        )
+                    }
                     IconButton(onClick = onRefresh) { Icon(Icons.Filled.Refresh, contentDescription = "Reload card list") }
                 },
             )
@@ -279,7 +294,17 @@ fun CollectionSetScreen(
                                 )
                             }
                         }
-                        items(shown, key = { it.id }) { card ->
+                        if (gallery) {
+                            items(shown.chunked(GALLERY_COLUMNS), key = { row -> "row-" + row.first().id }) { row ->
+                                row.forEach { card -> if (!card.placeholder) LaunchedEffect(card.id) { onRowPrice(card.id) } }
+                                ShowcaseRow(
+                                    cards = row.map { showcaseCard(it, setName, cardsState.prices[it.id]) { key -> count(it.id, key) } },
+                                    columns = GALLERY_COLUMNS,
+                                    onOpen = { tile -> viewerIndex = shown.indexOfFirst { it.id == tile.key } },
+                                )
+                            }
+                        }
+                        if (!gallery) items(shown, key = { it.id }) { card ->
                             if (!card.placeholder) LaunchedEffect(card.id) { onRowPrice(card.id) }
                             CardRow(
                                 card = card,
@@ -289,6 +314,26 @@ fun CollectionSetScreen(
                                 onRequestRemove = { key -> if (count(card.id, key) > 0) pendingRemoval = card.id to key },
                                 onOpen = { openCardId = card.id },
                             )
+                        }
+                    }
+                    viewerIndex?.let { start ->
+                        ShowcaseViewer(
+                            cards = shown.map { showcaseCard(it, setName, cardsState.prices[it.id]) { key -> count(it.id, key) } },
+                            startIndex = start,
+                            onDismiss = { viewerIndex = null },
+                        ) { tile ->
+                            // Add or remove copies right from the full-screen view.
+                            val card = shown.firstOrNull { it.id == tile.key } ?: return@ShowcaseViewer
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                card.variants.forEach { variant ->
+                                    VariantButton(
+                                        label = variant.label,
+                                        count = count(card.id, variant.key),
+                                        onTap = { onSetCount(all, card.id, variant.key, count(card.id, variant.key) + 1) },
+                                        onLongPress = { if (count(card.id, variant.key) > 0) pendingRemoval = card.id to variant.key },
+                                    )
+                                }
+                            }
                         }
                     }
                     pendingRemoval?.let { (cardId, key) ->
@@ -613,4 +658,30 @@ internal fun CollectionCard.matchesQuery(query: String): Boolean {
     val looksLikeNumber = q.any(Char::isDigit) && q.length <= 5 && q.none { it == ' ' }
     if (looksLikeNumber && (ScanMatcher.sameNumber(number, q) || number.trimStart('0').startsWith(q.trimStart('0')))) return true
     return name.contains(q, ignoreCase = true)
+}
+
+private const val GALLERY_COLUMNS = 3
+
+/** Rarities printed with foil or special art; owning one of these (or any holo/reverse copy) gets the holo sheen. */
+private val SHINY_RARITIES = listOf("holo", "ex", "gx", "v", "illustration", "ultra", "secret", "special", "hyper", "double", "shiny", "radiant", "ace", "amazing", "prism", "star")
+
+/** A collection card for the gallery: owned ones in colour with their copy count and lowest price. */
+private fun showcaseCard(card: CollectionCard, setName: String, prices: CardPrices?, count: (String) -> Int): ShowcaseCard {
+    val ownedKeys = card.variants.map { it.key }.filter { count(it) > 0 }
+    val copies = ownedKeys.sumOf(count)
+    val rarity = card.rarity.orEmpty().lowercase()
+    val shiny = ownedKeys.any { it.startsWith("holo") || it.startsWith("reverse") } ||
+        SHINY_RARITIES.any { r -> rarity.split(' ').any { it == r } || (r.length > 3 && rarity.contains(r)) }
+    val price = prices?.byVariant?.values?.minByOrNull { it.amount }?.let { formatCurrency(it.amount, it.currency) }
+    return ShowcaseCard(
+        key = card.id,
+        name = card.name,
+        caption = listOfNotNull(setName, "#${card.number}", card.rarity).joinToString(" · "),
+        image = card.image?.let { card.imageUrl("low") },
+        imageLarge = card.image?.let { card.imageUrl("high") },
+        owned = copies > 0,
+        shiny = copies > 0 && shiny,
+        badge = if (copies > 0) "×$copies" else null,
+        price = price,
+    )
 }
