@@ -1,0 +1,18 @@
+# Build output and IDE files
+.gradle/
+.kotlin/
+build/
+captures/
+.idea/
+*.iml
+.DS_Store
+
+# Machine-specific paths (Android SDK location)
+local.properties
+
+# Signing keys and built apps never go in the repository
+*.jks
+*.keystore
+keystore.properties
+*.apk
+*.aab
