@@ -3,6 +3,11 @@ package com.cardprice.app
 import android.app.Application
 import android.net.Uri
 import android.os.Bundle
+import com.cardprice.app.ui.money
+import com.cardprice.app.ui.display
+import com.cardprice.app.ui.appVersion
+import com.cardprice.app.data.inventory.InventoryStatus
+import com.cardprice.app.data.cloud.LiveStream
 import com.cardprice.app.data.inventory.CollectionLink
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -93,6 +98,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         ScanLog.init(filesDir)
         ScanLog.installCrashHandler()
+        // Beta: resume streaming to the live viewer if it was on.
+        LiveStream.refresh(this)
         enableEdgeToEdge()
         setContent {
             CardPricerTheme {
@@ -128,6 +135,36 @@ class MainActivity : ComponentActivity() {
                 }
                 val backStack by nav.currentBackStackEntryAsState()
                 val currentRoute = backStack?.destination?.route
+
+                // Beta live viewer: screens, collection changes and totals (does nothing unless streaming is on).
+                val inventoryItems by inventoryVm.items.collectAsState()
+                // Keep inventory's copy of the collection current from the start (not only once Inventory is opened).
+                LaunchedEffect(collection.owned, collection.progress) { inventoryVm.syncCollection(collection.owned, collection.progress) }
+                val screen = describeScreen(currentRoute, backStack?.arguments)
+                LaunchedEffect(screen) { if (screen != null) LiveStream.event("screen", screen) }
+                var lastCopies by remember { mutableStateOf<Int?>(null) }
+                LaunchedEffect(collection.totalCopies) {
+                    val before = lastCopies
+                    if (before != null && before != collection.totalCopies) {
+                        LiveStream.event("action", "Collection ${if (collection.totalCopies > before) "+" else ""}${collection.totalCopies - before} → ${collection.totalCopies} cards")
+                    }
+                    lastCopies = collection.totalCopies
+                }
+                LaunchedEffect(screen, collection, inventoryItems) {
+                    val held = inventoryItems.filter { it.status != InventoryStatus.SOLD }
+                    LiveStream.snapshot(
+                        mapOf(
+                            "screen" to screen,
+                            "cards" to collection.totalCopies,
+                            "sets" to collection.inProgress.size,
+                            "value" to collection.totalValue.display(),
+                            "inventoryUnits" to held.sumOf { it.quantity },
+                            "inventoryValue" to held.sumOf { it.totalMarket ?: 0.0 }.money(),
+                            "scanner" to if (currentRoute == "scan") "Open" else "Closed",
+                            "appVersion" to appVersion(this@MainActivity),
+                        ),
+                    )
+                }
 
                 Scaffold(
                     // Each screen draws its own top bar; this scaffold only adds the bottom bar.
@@ -445,3 +482,20 @@ private fun collectionSetRoute(
     "collection/${language.name}/${Uri.encode(setId)}?name=${Uri.encode(name)}&art=${Uri.encode(art.joinToString(ART_SEPARATOR))}" +
         "&focus=${Uri.encode(focusNumber.orEmpty())}&focusName=${Uri.encode(focusName.orEmpty())}"
 
+/** A readable name for the screen on show, for the live viewer ("Collection · Pitch Black"). */
+private fun describeScreen(route: String?, args: Bundle?): String? {
+    route ?: return null
+    return when {
+        route == "home" -> "Home"
+        route == "sets" -> "Pack Calculator"
+        route == "collection" -> "Collection"
+        route == "inventory" -> "Inventory"
+        route == "scan" -> "Scanner"
+        route == "scan-history" -> "Scan history"
+        route == "search" -> "Search"
+        route.startsWith("collection/") -> "Collection · " + (args?.getString("name")?.ifBlank { null } ?: args?.getString("setId") ?: "set")
+        route.startsWith("calc/") -> "Calculator · " + (args?.getString("setId") ?: "set")
+        route.startsWith("history/") -> "Price history · " + (args?.getString("name") ?: "")
+        else -> route.substringBefore('/')
+    }
+}

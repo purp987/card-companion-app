@@ -44,6 +44,20 @@ class CloudAccount(context: Context) {
 
     val signedIn: Boolean get() = serverUrl != null && token != null
 
+    /** This phone's id on the server once paired (trusted device), or null. */
+    var deviceId: String?
+        get() = prefs.getString("device_id", null)
+        set(value) = prefs.edit().putString("device_id", value).apply()
+
+    var deviceName: String?
+        get() = prefs.getString("device_name", null)
+        set(value) = prefs.edit().putString("device_name", value).apply()
+
+    /** Beta only: send what the app is doing to the server's live viewer. */
+    var liveStreaming: Boolean
+        get() = prefs.getBoolean("live_streaming", false)
+        set(value) = prefs.edit().putBoolean("live_streaming", value).apply()
+
     private companion object {
         const val TOKEN = "cloud_token"
     }
@@ -73,7 +87,24 @@ object CloudUrls {
 }
 
 /** The backup server's API (see the card-companion-server project). Calls block; run them off the main thread. */
-class CloudApi(private val baseUrl: String, private val token: String? = null) {
+/**
+ * [deviceId]: when this phone is paired, every request is signed with its [DeviceKey], so servers that
+ * only accept paired devices let it in.
+ */
+class CloudApi(private val baseUrl: String, private val token: String? = null, private val deviceId: String? = null) {
+    /** Pairs this phone with a code from the server's control panel; returns (device id, name). */
+    fun pair(code: String, name: String): Pair<String, String> {
+        val o = call("POST", "/v1/devices/pair", JSONObject().put("code", code).put("name", name).put("publicKey", DeviceKey.publicKeyBase64()))
+        return o.getString("deviceId") to o.optString("name", name)
+    }
+
+    /** Beta live viewer: a batch of events (and the latest snapshot). */
+    fun sendLive(events: org.json.JSONArray, snapshot: JSONObject?) {
+        val body = JSONObject().put("events", events)
+        if (snapshot != null) body.put("snapshot", snapshot)
+        call("POST", "/v1/live/events", body)
+    }
+
     /** Creates an account; returns the sign-in token. */
     fun register(email: String, password: String, signupCode: String, device: String): String =
         call("POST", "/v1/auth/register", JSONObject().put("email", email).put("password", password).put("signupCode", signupCode).put("device", device))
@@ -110,9 +141,15 @@ class CloudApi(private val baseUrl: String, private val token: String? = null) {
     }
 
     private fun call(method: String, path: String, body: JSONObject?): JSONObject {
-        val headers = token?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
+        val bodyText = body?.toString()
+        var headers = token?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
+        if (deviceId != null) {
+            // The signature covers the path as the server sees it (including any path in the server address).
+            val fullPath = (java.net.URI(baseUrl).rawPath ?: "").trimEnd('/') + path
+            headers = headers + DeviceKey.signHeaders(deviceId, method, fullPath, bodyText?.toByteArray(Charsets.UTF_8) ?: ByteArray(0))
+        }
         val text = try {
-            Http.send(method, baseUrl + path, headers, body?.toString())
+            Http.send(method, baseUrl + path, headers, bodyText)
         } catch (e: HttpException) {
             // The server's own message is written to be shown; never the raw response.
             val message = runCatching { JSONObject(e.body).optString("message") }.getOrNull()?.takeIf { it.isNotBlank() && it.length < 200 }

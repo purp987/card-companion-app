@@ -20,6 +20,9 @@ object ScanLog {
     private val time = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     @Volatile private var file: File? = null
 
+    /** Also told about every line (the beta's live viewer listens here). */
+    @Volatile var listener: ((warning: Boolean, message: String) -> Unit)? = null
+
     /** Call once with the app's files directory; until then lines only go to Logcat. */
     fun init(filesDir: File) {
         if (file != null) return
@@ -53,6 +56,7 @@ object ScanLog {
 
     private fun write(level: String, message: String) {
         if (level == "W") Log.w(TAG, message) else Log.d(TAG, message)
+        listener?.let { runCatching { it(level == "W", message) } }
         val target = file ?: return
         val line = "${time.format(Date())} $level [${Thread.currentThread().name}] $message\n"
         writer.execute {

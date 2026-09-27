@@ -11,6 +11,7 @@ import com.cardprice.app.data.cloud.CloudAccount
 import com.cardprice.app.data.cloud.CloudApi
 import com.cardprice.app.data.cloud.CloudException
 import com.cardprice.app.data.cloud.CloudUrls
+import com.cardprice.app.data.cloud.LiveStream
 import com.cardprice.app.data.cloud.ServerBackup
 import com.cardprice.app.data.inventory.InventoryItem
 import com.cardprice.app.data.inventory.InventoryStore
@@ -36,6 +37,11 @@ data class CloudState(
     val message: String? = null,
     val backups: List<ServerBackup>? = null,
     val lastBackupAt: Long? = null,
+    /** Paired with the server as a trusted device (beta). */
+    val deviceName: String? = null,
+    val liveStreaming: Boolean = false,
+    /** Beta (debug) build: pairing and the live viewer are offered. */
+    val beta: Boolean = false,
 )
 
 /** A downloaded backup ready to apply: the collection as a file (for the usual restore) and the inventory. */
@@ -55,6 +61,9 @@ class CloudViewModel(application: Application) : AndroidViewModel(application) {
         serverUrl = account.serverUrl,
         email = account.email,
         signedIn = account.signedIn,
+        deviceName = account.deviceId?.let { account.deviceName ?: "This phone" },
+        liveStreaming = account.liveStreaming,
+        beta = LiveStream.isBetaBuild(getApplication()),
         lastBackupAt = getApplication<Application>().getSharedPreferences("cloud", Context.MODE_PRIVATE)
             .getLong("last_backup_at", 0L).takeIf { it > 0 },
     )
@@ -76,7 +85,7 @@ class CloudViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         run("Signing in…") {
-            val token = action(CloudApi(url), deviceName())
+            val token = action(CloudApi(url, deviceId = account.deviceId.takeIf { account.serverUrl == url }), deviceName())
             account.serverUrl = url
             account.email = email.trim()
             account.token = token
@@ -92,7 +101,8 @@ class CloudViewModel(application: Application) : AndroidViewModel(application) {
         account.token = null
         _state.value = stateFromAccount().copy(message = "Signed out. Backups stay on the server.")
         // Also end the sign-in on the server; if that fails the token still expires there by itself.
-        if (url != null && token != null) viewModelScope.launch(Dispatchers.IO) { runCatching { CloudApi(url, token).logout() } }
+        val device = account.deviceId
+        if (url != null && token != null) viewModelScope.launch(Dispatchers.IO) { runCatching { CloudApi(url, token, device).logout() } }
     }
 
     fun backUpNow() = run("Backing up…") {
@@ -145,7 +155,45 @@ class CloudViewModel(application: Application) : AndroidViewModel(application) {
             _state.value = stateFromAccount().copy(message = "Sign in first.")
             return null
         }
-        return CloudApi(url, token)
+        return CloudApi(url, token, account.deviceId)
+    }
+
+    /**
+     * Pairs this phone with the server using a code from its control panel. From then on every request
+     * is signed with this phone's key, which servers set to "paired devices only" require.
+     */
+    fun pair(server: String, code: String) {
+        val url = CloudUrls.normalize(server, allowLocalHttp)
+        if (url == null) {
+            _state.update { it.copy(message = "Enter the server's address, e.g. cards.example.com. It must use HTTPS.") }
+            return
+        }
+        run("Pairing…") {
+            val (id, name) = CloudApi(url).pair(code.trim(), deviceName())
+            if (account.serverUrl != url) {
+                // A different server: the old sign-in doesn't apply there.
+                account.token = null
+            }
+            account.serverUrl = url
+            account.deviceId = id
+            account.deviceName = name
+            ScanLog.d("cloud: paired with ${hostOf(url)}")
+            _state.value = stateFromAccount().copy(message = "Paired. The server now trusts this phone.")
+        }
+    }
+
+    /** Forgets the pairing on this phone (remove it in the server's control panel too). */
+    fun unpair() {
+        setLiveStreaming(false)
+        account.deviceId = null
+        account.deviceName = null
+        _state.value = stateFromAccount().copy(message = "Unpaired. Remove it in the server's control panel as well.")
+    }
+
+    fun setLiveStreaming(on: Boolean) {
+        account.liveStreaming = on
+        LiveStream.refresh(getApplication())
+        _state.value = stateFromAccount()
     }
 
     /** Runs [block] off the main thread, showing [label] meanwhile and any error afterwards. */

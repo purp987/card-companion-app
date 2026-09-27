@@ -17,6 +17,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,6 +49,10 @@ fun CloudBackupDialog(state: CloudState, vm: CloudViewModel, onRestore: (Restore
         title = { Text("Cloud backup") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (state.beta) {
+                    TrustedDevice(state, vm)
+                    HorizontalDivider()
+                }
                 if (state.signedIn) {
                     SignedIn(state, vm, onRestoreRequest = { confirmRestore = it }, onDeleteRequest = { confirmDelete = it })
                 } else {
@@ -90,10 +95,47 @@ fun CloudBackupDialog(state: CloudState, vm: CloudViewModel, onRestore: (Restore
     }
 }
 
+/** Beta: pairing with the server as a trusted device, and the live viewer switch. */
+@Composable
+private fun TrustedDevice(state: CloudState, vm: CloudViewModel) {
+    Text("This phone (beta)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    if (state.deviceName == null) {
+        var server by rememberSaveable(state.serverUrl) { mutableStateOf(state.serverUrl.orEmpty()) }
+        var code by remember { mutableStateOf("") }
+        Text(
+            "Pair this phone so the server trusts it: in the server's control panel open Devices → Make a pairing code, then enter it here.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedTextField(
+            server, { server = it }, label = { Text("Server") }, placeholder = { Text("cards.example.com") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            code, { code = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(12) }, label = { Text("Pairing code") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth(),
+        )
+        Button(onClick = { vm.pair(server, code) }, enabled = server.isNotBlank() && code.length >= 6 && state.busy == null, modifier = Modifier.fillMaxWidth()) {
+            Text("Pair this phone")
+        }
+    } else {
+        Text("Paired as ${state.deviceName}. Every request is signed with this phone's key.", style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Stream to live viewer", modifier = Modifier.weight(1f))
+            Switch(checked = state.liveStreaming, onCheckedChange = vm::setLiveStreaming)
+        }
+        Text(
+            "Sends screens, scanner activity and totals to the server's control panel while the app is open.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = vm::unpair) { Text("Unpair") }
+    }
+}
+
 @Composable
 private fun SignInForm(state: CloudState, vm: CloudViewModel) {
     var creating by rememberSaveable { mutableStateOf(false) }
-    var server by rememberSaveable { mutableStateOf(state.serverUrl.orEmpty()) }
+    var server by rememberSaveable(state.serverUrl) { mutableStateOf(state.serverUrl.orEmpty()) }
     var email by rememberSaveable { mutableStateOf(state.email.orEmpty()) }
     // Passwords and invite codes are never saved; they're gone when the dialog closes.
     var password by remember { mutableStateOf("") }
