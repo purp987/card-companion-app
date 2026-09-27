@@ -61,7 +61,14 @@ data class InventoryItem(
     /** What one copy sold for, and when. */
     val soldPriceEach: Double? = null,
     val soldAt: Long? = null,
+    /**
+     * Set on items that come from the collection ("LANGUAGE|set|card|version"): their quantity
+     * follows the collection (see [CollectionLink]); only the extra details are saved here.
+     */
+    val collectionKey: String? = null,
 ) {
+    val fromCollection: Boolean get() = collectionKey != null
+
     val totalCost: Double? get() = costEach?.times(quantity)
     val totalMarket: Double? get() = marketPrice?.times(quantity)
 
@@ -86,9 +93,9 @@ data class InventorySummary(
     val soldUnits: Int,
     val soldRevenue: Double,
     val realizedProfit: Double,
+    /** Market value minus cost, only for held items that have both (collection cards usually have no cost). */
+    val unrealizedProfit: Double,
 ) {
-    val unrealizedProfit: Double get() = heldMarket - heldCost
-
     companion object {
         fun of(items: List<InventoryItem>): InventorySummary {
             val held = items.filter { it.status != InventoryStatus.SOLD }
@@ -96,13 +103,13 @@ data class InventorySummary(
             val priced = held.filter { it.marketPrice != null }
             return InventorySummary(
                 heldUnits = held.sumOf { it.quantity },
-                // Profit on paper only compares items that have both a cost and a price.
                 heldCost = priced.sumOf { it.totalCost ?: 0.0 },
                 heldMarket = priced.sumOf { it.totalMarket ?: 0.0 },
                 unpricedUnits = held.filter { it.marketPrice == null }.sumOf { it.quantity },
                 soldUnits = sold.sumOf { it.quantity },
                 soldRevenue = sold.sumOf { (it.soldPriceEach ?: 0.0) * it.quantity },
                 realizedProfit = sold.sumOf { it.realized ?: 0.0 },
+                unrealizedProfit = held.sumOf { it.unrealized ?: 0.0 },
             )
         }
     }
@@ -116,7 +123,9 @@ object InventoryOps {
      */
     fun sell(item: InventoryItem, count: Int, priceEach: Double?, now: Long, newId: String): List<InventoryItem> {
         val n = count.coerceIn(1, item.quantity)
-        val sold = item.copy(status = InventoryStatus.SOLD, quantity = n, soldPriceEach = priceEach, soldAt = now)
+        // A sale is a record of its own, no longer tied to the collection.
+        val sold = item.copy(status = InventoryStatus.SOLD, quantity = n, soldPriceEach = priceEach, soldAt = now, collectionKey = null)
+        if (item.fromCollection) return listOf(sold.copy(id = newId))
         return if (n == item.quantity) listOf(sold) else listOf(item.copy(quantity = item.quantity - n), sold.copy(id = newId))
     }
 

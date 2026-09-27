@@ -24,6 +24,11 @@ The bottom bar switches between three areas:
   - The summary shows units in stock, market value and profit on paper, plus units sold, revenue and realized profit. ↻ updates market prices from TCGplayer.
   - Search by name, set, number or location; filter by status and cards/sealed; switch to the gallery view.
   - Saved in `files/inventory/inventory.json` with hourly rolling backups (last 20); a damaged file falls back to the newest backup.
+  - **From your collection** (`data/inventory/CollectionLink.kt`): the inventory also lists the collection's cards, with quantities that follow the collection as it changes. *Whole collection* (the default for now) lists every copy; *Extras only (bulk)* lists the copies past one of each version; *Off* hides them. Cost, condition, asking price, location and notes added to these items are kept (the count isn't editable). *Mark sold…* takes the sold copies out of the collection and keeps the sale as an inventory record. Their prices come from TCGdex (USD only).
+  - **Plan: inventory takes over the bulk.**
+    1. *Now:* the inventory mirrors the whole collection, so both views show the same cards.
+    2. *Next:* switch to *Extras only* by default. The collection keeps a set number of copies per version (1 to start, adjustable), and every copy past that is bulk in the inventory, ready to price, store and sell.
+    3. *Then:* bulk lives in the inventory alone. Scans and pack openings put keepers in the collection and extras straight into inventory. Bulk gets lots (e.g. "500 commons, Box B"), locations and bulk pricing, and syncs through the backup server.
 - **Card scanner** (Scan cards on Home, or the Scan button on the Collection tab): point the camera at a card, or tap *Photo* to scan a picture.
   - On-device text recognition (Google ML Kit, offline) reads the set code and number at the bottom of the card, e.g. "PBL EN 111/084" or Japanese "SV2a 025/165", and looks the card up. Older cards that only print "215/203" are matched by set size plus the card's name.
   - Photos get extra enlarged passes over the bottom strip and the bottom-left corner, where the small print is.

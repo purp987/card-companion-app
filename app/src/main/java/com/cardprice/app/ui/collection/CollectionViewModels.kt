@@ -105,6 +105,31 @@ class CollectionViewModel(application: Application) : AndroidViewModel(applicati
         persist()
     }
 
+    /**
+     * Takes [count] copies of one version out of the collection (e.g. sold from inventory) without
+     * needing the set's card list: the set's owned counts are worked out from what's left.
+     */
+    fun removeCopies(language: Language, setId: String, cardId: String, variantKey: String, count: Int) {
+        if (count <= 0) return
+        _state.update { s ->
+            val key = ownedKey(language, setId, cardId, variantKey)
+            val left = ((s.owned[key] ?: 0) - count).coerceAtLeast(0)
+            val owned = if (left > 0) s.owned + (key to left) else s.owned - key
+            val prefix = "${language.name}|$setId|"
+            val inSet = owned.filter { (k, v) -> k.startsWith(prefix) && v > 0 }.keys
+            val progress = s.progress.map { p ->
+                if (p.language != language || p.setId != setId) p
+                else p.copy(
+                    ownedVariants = inSet.size,
+                    ownedCards = inSet.map { it.removePrefix(prefix).substringBefore('|') }.distinct().size,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            s.copy(owned = owned, progress = progress)
+        }
+        persist()
+    }
+
     /** Refreshes a set's totals after its card list loads (card counts can change as TCGdex adds cards). */
     fun onSetLoaded(language: Language, setId: String, setName: String, cards: List<CollectionCard>) {
         val existing = _state.value.progressFor(language, setId) ?: return

@@ -3,6 +3,7 @@ package com.cardprice.app
 import android.app.Application
 import android.net.Uri
 import android.os.Bundle
+import com.cardprice.app.data.inventory.CollectionLink
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -184,7 +185,16 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable(Tab.INVENTORY.route) {
-                            InventoryScreen(vm = inventoryVm, allSets = state.allSets)
+                            InventoryScreen(
+                                vm = inventoryVm,
+                                allSets = state.allSets,
+                                collection = collection,
+                                onSoldFromCollection = { item, count ->
+                                    item.collectionKey?.let(CollectionLink::parseKey)?.let { k ->
+                                        collectionVm.removeCopies(k.language, k.setId, k.cardId, k.variantKey, count)
+                                    }
+                                },
+                            )
                         }
                         composable(Tab.COLLECTION.route) {
                             CollectionHomeScreen(

@@ -62,7 +62,8 @@ class InventoryStore(filesDir: File) {
                         .put("costEach", i.costEach ?: JSONObject.NULL).put("marketPrice", i.marketPrice ?: JSONObject.NULL)
                         .put("priceUpdatedAt", i.priceUpdatedAt ?: JSONObject.NULL).put("askingPrice", i.askingPrice ?: JSONObject.NULL)
                         .put("status", i.status.name).put("location", i.location ?: JSONObject.NULL).put("notes", i.notes ?: JSONObject.NULL)
-                        .put("addedAt", i.addedAt).put("soldPriceEach", i.soldPriceEach ?: JSONObject.NULL).put("soldAt", i.soldAt ?: JSONObject.NULL),
+                        .put("addedAt", i.addedAt).put("soldPriceEach", i.soldPriceEach ?: JSONObject.NULL).put("soldAt", i.soldAt ?: JSONObject.NULL)
+                        .put("collectionKey", i.collectionKey ?: JSONObject.NULL),
                 )
             }
             return JSONObject().put("version", 1).put("items", array)
@@ -99,6 +100,7 @@ class InventoryStore(filesDir: File) {
                         addedAt = o.optLong("addedAt"),
                         soldPriceEach = dbl("soldPriceEach"),
                         soldAt = lng("soldAt"),
+                        collectionKey = str("collectionKey"),
                     )
                 }.getOrNull()
             }

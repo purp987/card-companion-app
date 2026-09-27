@@ -73,6 +73,8 @@ import com.cardprice.app.data.PokemonSet
 import com.cardprice.app.data.SetSearch
 import com.cardprice.app.data.collection.TCGPLAYER_IMAGE_PREFIX
 import com.cardprice.app.data.inventory.CardCondition
+import com.cardprice.app.ui.collection.CollectionState
+import com.cardprice.app.data.inventory.CollectionMode
 import com.cardprice.app.data.inventory.InventoryItem
 import com.cardprice.app.data.inventory.InventoryKind
 import com.cardprice.app.data.inventory.InventoryOps
@@ -93,9 +95,19 @@ import com.cardprice.app.ui.toAmount
 /** Inventory tab: stock held to sell or trade, with cost, market value and profit. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InventoryScreen(vm: InventoryViewModel, allSets: List<PokemonSet>) {
+fun InventoryScreen(
+    vm: InventoryViewModel,
+    allSets: List<PokemonSet>,
+    collection: CollectionState,
+    /** Copies of a collection item were sold: take them out of the collection. */
+    onSoldFromCollection: (InventoryItem, count: Int) -> Unit,
+) {
     val items by vm.items.collectAsState()
     val refreshing by vm.refreshing.collectAsState()
+    val mode by vm.mode.collectAsState()
+    val linking by vm.linking.collectAsState()
+    LaunchedEffect(collection.owned, collection.progress) { vm.syncCollection(collection.owned, collection.progress) }
+    var source by rememberSaveable { mutableStateOf<Boolean?>(null) } // true: from collection, false: added here
     var status by rememberSaveable { mutableStateOf<InventoryStatus?>(null) }
     var kind by rememberSaveable { mutableStateOf<InventoryKind?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -107,6 +119,7 @@ fun InventoryScreen(vm: InventoryViewModel, allSets: List<PokemonSet>) {
     val shown = items
         .filter { status == null || it.status == status }
         .filter { kind == null || it.kind == kind }
+        .filter { source == null || it.fromCollection == source }
         .filter { InventoryOps.matches(it, query) }
     val summary = InventorySummary.of(items)
 
@@ -136,7 +149,8 @@ fun InventoryScreen(vm: InventoryViewModel, allSets: List<PokemonSet>) {
         },
     ) { padding ->
         LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-            item { SummaryCard(summary, refreshing) }
+            item { SummaryCard(summary, refreshing ?: linking?.let { (d, t) -> d to t }, linking != null) }
+            item { CollectionModeRow(mode, vm::setMode) }
             item {
                 OutlinedTextField(
                     value = query,
@@ -158,6 +172,10 @@ fun InventoryScreen(vm: InventoryViewModel, allSets: List<PokemonSet>) {
                     }
                     InventoryKind.entries.forEach { k ->
                         FilterChip(selected = kind == k, onClick = { kind = if (kind == k) null else k }, label = { Text(if (k == InventoryKind.CARD) "Cards" else "Sealed") })
+                    }
+                    if (mode != CollectionMode.OFF) {
+                        FilterChip(selected = source == true, onClick = { source = if (source == true) null else true }, label = { Text("From collection") })
+                        FilterChip(selected = source == false, onClick = { source = if (source == false) null else false }, label = { Text("Added here") })
                     }
                 }
             }
@@ -202,14 +220,22 @@ fun InventoryScreen(vm: InventoryViewModel, allSets: List<PokemonSet>) {
             isNew = items.none { it.id == item.id },
             onDismiss = { editing = null },
             onSave = { vm.save(it); editing = null },
-            onSell = { count, price -> vm.sell(item.id, count, price); editing = null },
+            onSell = { count, price ->
+                if (item.fromCollection) {
+                    vm.recordCollectionSale(item, count, price)
+                    onSoldFromCollection(item, count)
+                } else {
+                    vm.sell(item.id, count, price)
+                }
+                editing = null
+            },
             onDelete = { vm.delete(item.id); editing = null },
         )
     }
 }
 
 @Composable
-private fun SummaryCard(summary: InventorySummary, refreshing: Pair<Int, Int>?) {
+private fun SummaryCard(summary: InventorySummary, refreshing: Pair<Int, Int>?, loadingCollection: Boolean = false) {
     Card(Modifier.fillMaxWidth().padding(16.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -226,12 +252,34 @@ private fun SummaryCard(summary: InventorySummary, refreshing: Pair<Int, Int>?) 
                 }
             }
             val note = when {
+                refreshing != null && loadingCollection -> "Loading collection cards and prices ${refreshing.first} of ${refreshing.second}…"
                 refreshing != null -> "Updating prices ${refreshing.first} of ${refreshing.second}…"
                 summary.unpricedUnits > 0 -> "${summary.unpricedUnits} without a market price (entered by hand, or tap ↻)."
                 else -> null
             }
             note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
+    }
+}
+
+/** Which collection cards the inventory shows: all of them for now; bulk (extras) is where it's heading. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CollectionModeRow(mode: CollectionMode, onMode: (CollectionMode) -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
+        Text("From your collection", style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CollectionMode.entries.forEach { m -> FilterChip(selected = mode == m, onClick = { onMode(m) }, label = { Text(m.label) }) }
+        }
+        Text(
+            when (mode) {
+                CollectionMode.ALL -> "Every copy in your collection is listed here too, and follows it as it changes."
+                CollectionMode.EXTRAS -> "Your collection keeps 1 of each version; every copy past that is bulk to sell or trade."
+                CollectionMode.OFF -> "Only items you add here."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -258,6 +306,9 @@ private fun ItemRow(item: InventoryItem, onClick: () -> Unit) {
             }
             Text(moneyLine(item), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             item.location?.let { Text("📍 $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (item.fromCollection) {
+                Text("From your collection", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("×${item.quantity}", fontWeight = FontWeight.Bold)
@@ -550,8 +601,15 @@ private fun ItemEditor(
                     OutlinedTextField(grade, { grade = it }, label = { Text("Grade") }, placeholder = { Text("e.g. PSA 10") }, singleLine = true, modifier = Modifier.weight(1f))
                 }
             }
+            if (item.fromCollection) {
+                Text(
+                    "×${item.quantity} from your collection. The count follows the collection; details you add here are kept.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                if (!item.fromCollection) OutlinedTextField(
                     quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("Quantity") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f),
                 )
@@ -590,7 +648,9 @@ private fun ItemEditor(
                     if (item.status != InventoryStatus.SOLD) {
                         OutlinedButton(onClick = { selling = true }, modifier = Modifier.weight(1f)) { Text("Mark sold…") }
                     }
-                    TextButton(onClick = { confirmDelete = true }, modifier = Modifier.weight(1f)) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    if (!item.fromCollection) {
+                        TextButton(onClick = { confirmDelete = true }, modifier = Modifier.weight(1f)) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    }
                 }
             }
             Spacer(Modifier.size(24.dp))
@@ -626,7 +686,11 @@ private fun SellDialog(item: InventoryItem, onDismiss: () -> Unit, onSell: (Int,
                     price, { price = it }, label = { Text("Sold for, each") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 )
-                Text("Selling part of a stack keeps the rest in stock.", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    if (item.fromCollection) "Sold copies are taken out of your collection, and the sale is kept in inventory."
+                    else "Selling part of a stack keeps the rest in stock.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         },
         confirmButton = {
