@@ -68,6 +68,9 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun delete(id: String) = change { list -> list.filterNot { it.id == id } }
 
+    /** Replaces the whole inventory (restoring a backup). The replaced version is kept as a backup file. */
+    fun replaceAll(items: List<InventoryItem>) = change { items }
+
     fun sell(id: String, count: Int, priceEach: Double?) = change { list ->
         list.flatMap { if (it.id == id) InventoryOps.sell(it, count, priceEach, System.currentTimeMillis(), newId()) else listOf(it) }
     }

@@ -80,6 +80,7 @@ fun HomeScreen(
     onRestoreBackup: (CollectionStore.Backup) -> Unit,
     onSaveRestorePoint: suspend (String) -> CollectionStore.Backup?,
     onDismissRestoreNotice: () -> Unit,
+    onOpenCloud: () -> Unit,
 ) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val learning = ScanLearning.get(LocalContext.current.filesDir)
@@ -248,6 +249,10 @@ fun HomeScreen(
             onOpenBackups = {
                 showSettings = false
                 showBackups = true
+            },
+            onOpenCloud = {
+                showSettings = false
+                onOpenCloud()
             },
             onSaveRestorePoint = {
                 showSettings = false

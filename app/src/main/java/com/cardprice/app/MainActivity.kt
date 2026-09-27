@@ -3,6 +3,12 @@ package com.cardprice.app
 import android.app.Application
 import android.net.Uri
 import android.os.Bundle
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.cardprice.app.data.collection.CollectionStore
+import com.cardprice.app.ui.cloud.CloudViewModel
+import com.cardprice.app.ui.cloud.CloudBackupDialog
 import com.cardprice.app.ui.AppIcons
 import com.cardprice.app.ui.inventory.InventoryViewModel
 import com.cardprice.app.ui.inventory.InventoryScreen
@@ -80,6 +86,7 @@ class MainActivity : ComponentActivity() {
     private val collectionVm: CollectionViewModel by viewModels()
     private val catalogVm: CatalogViewModel by viewModels()
     private val inventoryVm: InventoryViewModel by viewModels()
+    private val cloudVm: CloudViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,6 +112,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val nav = rememberNavController()
+                var showCloud by rememberSaveable { mutableStateOf(false) }
+                if (showCloud) {
+                    val cloud by cloudVm.state.collectAsState()
+                    CloudBackupDialog(
+                        state = cloud,
+                        vm = cloudVm,
+                        onRestore = { data ->
+                            collectionVm.restore(CollectionStore.Backup(data.collectionFile, System.currentTimeMillis(), 0, 0))
+                            data.inventory?.let(inventoryVm::replaceAll)
+                        },
+                        onDismiss = { showCloud = false; cloudVm.clearMessage() },
+                    )
+                }
                 val backStack by nav.currentBackStackEntryAsState()
                 val currentRoute = backStack?.destination?.route
 
@@ -150,6 +170,7 @@ class MainActivity : ComponentActivity() {
                                 onRestoreBackup = collectionVm::restore,
                                 onSaveRestorePoint = collectionVm::saveRestorePoint,
                                 onDismissRestoreNotice = collectionVm::dismissRestoreNotice,
+                                onOpenCloud = { showCloud = true },
                             )
                         }
                         composable(Tab.CALCULATOR.route) {

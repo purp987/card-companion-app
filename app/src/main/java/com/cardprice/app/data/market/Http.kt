@@ -14,6 +14,10 @@ internal object Http {
     fun postJson(url: String, body: String, headers: Map<String, String> = emptyMap()): String =
         request("POST", url, headers + ("Content-Type" to "application/json"), body)
 
+    /** Any method; a JSON [body] is sent with the right content type. */
+    fun send(method: String, url: String, headers: Map<String, String> = emptyMap(), body: String? = null): String =
+        request(method, url, if (body != null) headers + ("Content-Type" to "application/json") else headers, body)
+
     /** Retries brief server hiccups (502/503/504) a couple of times before giving up. */
     private fun request(method: String, url: String, headers: Map<String, String>, body: String?): String {
         var attempt = 0

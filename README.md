@@ -61,6 +61,7 @@ The bottom bar switches between three areas:
 - **Search**
   - *Home → Search all cards*: searches every English or Japanese card on TCGplayer, most popular (best-selling) first, or sorted by highest price. With no text it lists the most popular cards right now. Each result shows its market price and "You have N" if it's in your collection. Tapping a result opens it in its set; promos and one-off products open on TCGplayer instead. `data/search/TcgSetMap.kt` maps TCGplayer sets to the collection's sets.
   - *In a set*: "Find a card by number or name" filters instantly. "111", "#111", "111/084" and "TG05" all work, as does part of a name.
+- **Cloud backup** (beta; ⚙ Settings → *Cloud backup…*): sign in to a [Card Companion server](https://github.com/purp987/card-companion-server), or create an account with an invite code. *Back up now* uploads the collection, inventory, scan learning and history, and settings such as purchases, favorites and custom sets. API tokens aren't included. Server backups are listed with their card counts and can be restored (the current collection is kept as a local backup first) or deleted. Server addresses must be HTTPS; beta builds may also use `http://localhost` through `adb reverse` for a test server.
 - **Restore points**: ⚙ Settings → *Save a restore point…* keeps a named copy of your collection that automatic backups never replace, such as "Manual entries".
 - **Backups**: before the collection is saved, the version being replaced is kept as a backup (at most once an hour, last 20 kept). If the collection file is ever missing or damaged, the app loads the newest backup and says so on Home. ⚙ Settings → *Restore a backup…* lists them. Restoring keeps your current collection as a backup too, so it can be undone.
 - **Set pictures** are the same everywhere (both set lists, set headers, Home). English sets use the TCGdex logo, then TCGplayer pack art, then the set symbol. Japanese sets use pack art. Simplified Chinese sets use a code badge.
@@ -94,6 +95,9 @@ Open the folder in Android Studio and press Run, or use Gradle. The build needs 
 - Release builds are signed with the building computer's debug key, so copies built on the same computer install over each other and keep people's data. A copy built on another computer can't update one built here.
 - Raise `versionCode` in `app/build.gradle.kts` for every copy you hand out.
 - Unit tests: `./gradlew testDebugUnitTest`.
+
+## Security
+See [SECURITY.md](SECURITY.md): how data and tokens are stored, HTTPS-only networking, and release signing.
 
 ## Troubleshooting
 The scanner keeps a log of what it read and did (and any crashes) on the phone. ⚙ Settings → About → *Send debug log…* shares it.

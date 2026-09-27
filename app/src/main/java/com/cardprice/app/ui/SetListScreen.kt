@@ -433,6 +433,8 @@ fun SettingsDialog(
     onDismiss: () -> Unit,
     onSave: (String?) -> Unit,
     onOpenBackups: (() -> Unit)? = null,
+    /** Opens Cloud backup (backup server sign-in, upload and restore). */
+    onOpenCloud: (() -> Unit)? = null,
     onSaveRestorePoint: (() -> Unit)? = null,
     /** e.g. "Learned 12 readings from 15 confirmations (3 corrections)"; null hides the section. */
     learningSummary: String? = null,
@@ -465,6 +467,15 @@ fun SettingsDialog(
                     // A password-type field keeps the keyboard from learning or suggesting the token.
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 )
+                if (onOpenCloud != null) {
+                    HorizontalDivider()
+                    Text("Cloud backup", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Keep a copy of your collection and inventory on a backup server, to restore on this or another phone.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedButton(onClick = onOpenCloud) { Text("Cloud backup…") }
+                }
                 if (onOpenBackups != null) {
                     HorizontalDivider()
                     Text("Collection backups", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
