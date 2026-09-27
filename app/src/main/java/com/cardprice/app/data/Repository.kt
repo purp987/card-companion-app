@@ -7,6 +7,15 @@ import org.json.JSONObject
 /** Persists favorites, user-added sets and saved purchases in SharedPreferences. */
 class Repository(context: Context) {
     private val prefs = context.getSharedPreferences("card_pricer", Context.MODE_PRIVATE)
+    private val secrets = SecretStore(context)
+
+    init {
+        // Older versions kept the PriceCharting token in plain text; move it to encrypted storage.
+        prefs.getString(KEY_PC_TOKEN, null)?.let { plain ->
+            runCatching { secrets.put(KEY_PC_TOKEN, plain.trim().ifBlank { null }) }
+            prefs.edit().remove(KEY_PC_TOKEN).apply()
+        }
+    }
 
     fun loadFavorites(): Set<String> = prefs.getStringSet(KEY_FAVORITES, emptySet()).orEmpty().toSet()
 
@@ -14,10 +23,10 @@ class Repository(context: Context) {
         prefs.edit().putStringSet(KEY_FAVORITES, ids).apply()
     }
 
-    fun loadPriceChartingToken(): String? = prefs.getString(KEY_PC_TOKEN, null)?.ifBlank { null }
+    fun loadPriceChartingToken(): String? = runCatching { secrets.get(KEY_PC_TOKEN) }.getOrNull()?.ifBlank { null }
 
     fun savePriceChartingToken(token: String?) {
-        prefs.edit().putString(KEY_PC_TOKEN, token?.trim()?.ifBlank { null }).apply()
+        secrets.put(KEY_PC_TOKEN, token?.trim()?.ifBlank { null })
     }
 
     fun loadLanguage(): Language =

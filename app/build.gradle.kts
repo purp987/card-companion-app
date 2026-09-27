@@ -1,7 +1,15 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// Release signing key, kept out of the repository (see SECURITY.md). Without it, release builds are
+// signed with this computer's debug key.
+val keystoreProps = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { f ->
+    Properties().apply { f.inputStream().use(::load) }
 }
 
 android {
@@ -20,6 +28,17 @@ android {
         manifestPlaceholders["appLabel"] = "Card Companion"
     }
 
+    signingConfigs {
+        if (keystoreProps != null) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         // Beta: installs as a separate app ("Card Companion β", com.cardprice.app.beta) next to the
         // public one, with its own data, so testing never touches the real collection. Debuggable, so
@@ -34,9 +53,9 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Signed with this computer's debug key, the same one as the copy already installed on the
-            // owner's phone, so the shared APK installs as an update there without losing data.
-            signingConfig = signingConfigs.getByName("debug")
+            // The private release key when keystore.properties exists; otherwise this computer's debug
+            // key (what the copies shared so far were signed with, so they keep updating in place).
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

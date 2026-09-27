@@ -47,5 +47,7 @@ fun Throwable.userMessage(): String = when (this) {
     is HttpException -> if (code >= 500) "The server is having trouble right now ($code). Try again in a moment."
         else "The server returned an error ($code)."
     is org.json.JSONException -> "The server sent data this app couldn't read."
-    else -> message ?: "Something went wrong."
+    is java.io.IOException -> "Couldn't reach the server. Check your connection."
+    // Raw messages can contain a request's address (with an API token in it), so they're never shown.
+    else -> message?.takeIf { "://" !in it && it.length < 120 } ?: "Something went wrong."
 }
