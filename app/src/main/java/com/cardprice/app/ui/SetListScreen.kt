@@ -462,6 +462,8 @@ fun SettingsDialog(
                     label = { Text("PriceCharting API token") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
+                    // A password-type field keeps the keyboard from learning or suggesting the token.
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
                 )
                 if (onOpenBackups != null) {
                     HorizontalDivider()

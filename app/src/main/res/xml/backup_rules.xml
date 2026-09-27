@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android backup (Android 11 and older): everything except encrypted secrets, which can't be
+     decrypted on another phone, and the debug log. Caches are never backed up. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secrets.xml" />
+    <exclude domain="file" path="logs/" />
+</full-backup-content>
