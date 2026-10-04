@@ -81,6 +81,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Picks each set's colours from its artwork for the collection screen.
+    implementation("androidx.palette:palette-ktx:1.0.0")
 
     // Card scanner: camera preview/analysis and on-device text recognition (bundled model, works offline).
     implementation("androidx.camera:camera-camera2:1.3.4")

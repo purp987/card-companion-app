@@ -1,6 +1,14 @@
 package com.cardprice.app.ui.inventory
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -115,12 +123,15 @@ fun InventoryScreen(
     var editing by remember { mutableStateOf<InventoryItem?>(null) }
     var adding by rememberSaveable { mutableStateOf(false) }
     var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var sort by rememberSaveable { mutableStateOf(InventorySort.VALUE) }
+    var menu by remember { mutableStateOf(false) }
 
     val shown = items
         .filter { status == null || it.status == status }
         .filter { kind == null || it.kind == kind }
         .filter { source == null || it.fromCollection == source }
         .filter { InventoryOps.matches(it, query) }
+        .let(sort::apply)
     val summary = InventorySummary.of(items)
 
     Scaffold(
@@ -137,6 +148,24 @@ fun InventoryScreen(
                     } else {
                         IconButton(onClick = vm::refreshPrices) { Icon(Icons.Filled.Refresh, contentDescription = "Update market prices") }
                     }
+                    // Settings you change rarely live here, out of the way of the list.
+                    Box {
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Sort and options") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            MenuLabel("Sort by")
+                            InventorySort.entries.forEach { o -> MenuChoice(o.label, sort == o) { sort = o; menu = false } }
+                            HorizontalDivider()
+                            MenuLabel("From your collection")
+                            CollectionMode.entries.forEach { m -> MenuChoice(m.label, mode == m) { vm.setMode(m); menu = false } }
+                            if (mode != CollectionMode.OFF) {
+                                HorizontalDivider()
+                                MenuLabel("Show")
+                                MenuChoice("Everything", source == null) { source = null; menu = false }
+                                MenuChoice("From collection", source == true) { source = true; menu = false }
+                                MenuChoice("Added here", source == false) { source = false; menu = false }
+                            }
+                        }
+                    }
                 },
             )
         },
@@ -150,32 +179,29 @@ fun InventoryScreen(
     ) { padding ->
         LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
             item { SummaryCard(summary, refreshing ?: linking?.let { (d, t) -> d to t }, linking != null) }
-            item { CollectionModeRow(mode, vm::setMode) }
             item {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                     placeholder = { Text("Search name, set, number or location") },
+                    textStyle = MaterialTheme.typography.bodyMedium,
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, contentDescription = "Clear") } },
                     singleLine = true,
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(12.dp),
                 )
             }
             item {
-                @OptIn(ExperimentalLayoutApi::class)
-                FlowRow(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = status == null, onClick = { status = null }, label = { Text("All") })
-                    InventoryStatus.entries.forEach { s ->
+                // One scrolling row: status, then kind.
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    item { FilterChip(selected = status == null, onClick = { status = null }, label = { Text("All") }) }
+                    items(InventoryStatus.entries.toList()) { s ->
                         FilterChip(selected = status == s, onClick = { status = if (status == s) null else s }, label = { Text(s.label) })
                     }
-                    InventoryKind.entries.forEach { k ->
+                    item { VerticalDivider(Modifier.height(24.dp)) }
+                    items(InventoryKind.entries.toList()) { k ->
                         FilterChip(selected = kind == k, onClick = { kind = if (kind == k) null else k }, label = { Text(if (k == InventoryKind.CARD) "Cards" else "Sealed") })
-                    }
-                    if (mode != CollectionMode.OFF) {
-                        FilterChip(selected = source == true, onClick = { source = if (source == true) null else true }, label = { Text("From collection") })
-                        FilterChip(selected = source == false, onClick = { source = if (source == false) null else false }, label = { Text("Added here") })
                     }
                 }
             }
@@ -196,7 +222,7 @@ fun InventoryScreen(
                     ShowcaseRow(row.map(::showcaseItem), columns = 3, onOpen = { tile -> viewerIndex = shown.indexOfFirst { it.id == tile.key } })
                 }
             } else {
-                items(shown, key = { it.id }) { item -> ItemRow(item) { editing = item } }
+                items(shown, key = { it.id }) { item -> ItemRow(item, Modifier.animateItem()) { editing = item } }
             }
         }
     }
@@ -236,87 +262,126 @@ fun InventoryScreen(
 
 @Composable
 private fun SummaryCard(summary: InventorySummary, refreshing: Pair<Int, Int>?, loadingCollection: Boolean = false) {
-    Card(Modifier.fillMaxWidth().padding(16.dp)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Stat("${summary.heldUnits}", "in stock", Modifier.weight(1f))
-                Stat(summary.heldMarket.money(), "market value", Modifier.weight(1f))
-                Stat(signed(summary.unrealizedProfit), "vs. cost", Modifier.weight(1f), profitColor(summary.unrealizedProfit))
-            }
-            if (summary.soldUnits > 0) {
-                HorizontalDivider()
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Stat("${summary.soldUnits}", "sold", Modifier.weight(1f))
-                    Stat(summary.soldRevenue.money(), "revenue", Modifier.weight(1f))
-                    Stat(signed(summary.realizedProfit), "profit", Modifier.weight(1f), profitColor(summary.realizedProfit))
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+    ) {
+        Column {
+            Column(Modifier.padding(16.dp)) {
+                Text("Market value", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(summary.heldMarket.money(), style = MaterialTheme.typography.headlineMedium.tnum(), fontWeight = FontWeight.Bold)
+                if (summary.unrealizedProfit != 0.0) {
+                    Text("${signed(summary.unrealizedProfit)} vs. cost", style = MaterialTheme.typography.titleSmall.tnum(), color = profitColor(summary.unrealizedProfit))
                 }
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Stat("${summary.heldUnits}", "in stock", Modifier.weight(1f))
+                    Stat("${summary.soldUnits}", "sold", Modifier.weight(1f))
+                    Stat(signed(summary.realizedProfit), "realized", Modifier.weight(1f), profitColor(summary.realizedProfit))
+                }
+                val note = when {
+                    refreshing != null && loadingCollection -> "Loading collection cards and prices…"
+                    refreshing != null -> "Updating prices…"
+                    summary.unpricedUnits > 0 -> "${summary.unpricedUnits} without a market price"
+                    else -> null
+                }
+                note?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp)) }
             }
-            val note = when {
-                refreshing != null && loadingCollection -> "Loading collection cards and prices ${refreshing.first} of ${refreshing.second}…"
-                refreshing != null -> "Updating prices ${refreshing.first} of ${refreshing.second}…"
-                summary.unpricedUnits > 0 -> "${summary.unpricedUnits} without a market price (entered by hand, or tap ↻)."
-                else -> null
+            // Progress as a hairline along the bottom edge, not more text.
+            if (refreshing != null && refreshing.second > 0) {
+                LinearProgressIndicator(progress = { refreshing.first.toFloat() / refreshing.second }, modifier = Modifier.fillMaxWidth().height(2.dp))
             }
-            note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
 }
 
-/** Which collection cards the inventory shows: all of them for now; bulk (extras) is where it's heading. */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CollectionModeRow(mode: CollectionMode, onMode: (CollectionMode) -> Unit) {
-    Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
-        Text("From your collection", style = MaterialTheme.typography.labelLarge)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CollectionMode.entries.forEach { m -> FilterChip(selected = mode == m, onClick = { onMode(m) }, label = { Text(m.label) }) }
-        }
-        Text(
-            when (mode) {
-                CollectionMode.ALL -> "Every copy in your collection is listed here too, and follows it as it changes."
-                CollectionMode.EXTRAS -> "Your collection keeps 1 of each version; every copy past that is bulk to sell or trade."
-                CollectionMode.OFF -> "Only items you add here."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+private fun MenuLabel(text: String) {
+    Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+}
+
+@Composable
+private fun MenuChoice(text: String, selected: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(text) },
+        onClick = onClick,
+        leadingIcon = { if (selected) Icon(Icons.Filled.Check, contentDescription = null) else Spacer(Modifier.size(24.dp)) },
+    )
+}
+
+/** Orders for the list; highest value first by default, like a holdings view. */
+private enum class InventorySort(val label: String) {
+    VALUE("Value, high to low"),
+    PROFIT("Profit, high to low"),
+    NAME("Name"),
+    RECENT("Recently added");
+
+    fun apply(list: List<InventoryItem>): List<InventoryItem> = when (this) {
+        VALUE -> list.sortedByDescending { it.totalMarket ?: ((it.soldPriceEach ?: 0.0) * it.quantity) }
+        PROFIT -> list.sortedByDescending { it.realized ?: it.unrealized ?: Double.NEGATIVE_INFINITY }
+        NAME -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        RECENT -> list.sortedByDescending { it.addedAt }
     }
 }
+
+/** Figures in columns line up when every digit has the same width. */
+private fun androidx.compose.ui.text.TextStyle.tnum() = copy(fontFeatureSettings = "tnum")
 
 @Composable
 private fun Stat(value: String, label: String, modifier: Modifier, color: Color = Color.Unspecified) {
     Column(modifier) {
-        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = color, maxLines = 1)
-        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleSmall.tnum(), fontWeight = FontWeight.Bold, color = color, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun ItemRow(item: InventoryItem, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ItemPicture(item, Modifier.width(52.dp))
-        Column(Modifier.weight(1f)) {
-            Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (item.details.isNotEmpty()) {
-                Text(item.details, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+private fun ItemRow(item: InventoryItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(modifier) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 72.dp).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ItemPicture(item, Modifier.width(40.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (item.status != InventoryStatus.IN_STOCK) StatusTag(item.status)
+                    Text(
+                        listOfNotNull(item.setName, item.number?.let { "#$it" }, item.grade ?: item.condition?.short, "×${item.quantity}").joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Text(moneyLine(item), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            item.location?.let { Text("📍 $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (item.fromCollection) {
-                Text("From your collection", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Column(horizontalAlignment = Alignment.End) {
+                val total = if (item.status == InventoryStatus.SOLD) item.soldPriceEach?.times(item.quantity) else item.totalMarket
+                Text(total?.money() ?: "—", style = MaterialTheme.typography.titleSmall.tnum(), fontWeight = FontWeight.Bold)
+                val profit = item.realized ?: item.unrealized
+                val cost = item.totalCost
+                if (profit != null) {
+                    val pct = if (cost != null && cost > 0) " (${"%+.0f".format(profit / cost * 100)}%)" else ""
+                    Text(signed(profit) + pct, style = MaterialTheme.typography.labelMedium.tnum(), color = profitColor(profit))
+                }
             }
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("×${item.quantity}", fontWeight = FontWeight.Bold)
-            StatusChip(item.status)
-            (item.realized ?: item.unrealized)?.let { Text(signed(it), color = profitColor(it), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
-        }
+        HorizontalDivider(Modifier.padding(start = 68.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     }
-    HorizontalDivider(Modifier.padding(start = 80.dp))
+}
+
+/** Only Listed and Sold get a tag; In stock is the normal state and needs none. */
+@Composable
+private fun StatusTag(status: InventoryStatus) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Text(status.label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+    }
 }
 
 @Composable

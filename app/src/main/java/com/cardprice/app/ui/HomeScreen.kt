@@ -58,6 +58,7 @@ import com.cardprice.app.data.Purchase
 import com.cardprice.app.data.collection.SetProgress
 import com.cardprice.app.data.collection.CollectionStore
 import com.cardprice.app.data.scan.ScanLearning
+import com.cardprice.app.ui.collection.SetHeroCard
 import com.cardprice.app.ui.collection.CollectionState
 import com.cardprice.app.ui.theme.seriesColor
 import kotlinx.coroutines.launch
@@ -425,26 +426,15 @@ private fun EmptyHint(text: String) {
 
 @Composable
 private fun ProgressCard(p: SetProgress, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                SetArt(p.art, p.setId, MaterialTheme.colorScheme.secondary, Modifier.size(56.dp))
-                Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text(p.setName, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "${p.language.label} · ${p.ownedCards} of ${p.totalCards} cards · ${p.ownedVariants} of ${p.totalVariants} variants",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("${(p.cardFraction * 100).toInt()}%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    p.value.display()?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                }
-            }
-            LinearProgressIndicator(progress = { p.cardFraction }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
-        }
-    }
+    // The same card as the Collection tab's carousel, a little shorter.
+    SetHeroCard(
+        art = p.art,
+        title = p.setName,
+        subtitle = p.language.label,
+        progress = p,
+        height = 150.dp,
+        onClick = onClick,
+    )
 }
 
 @Composable
