@@ -22,7 +22,7 @@ data class ScanSetup(
     val setName: String? = null,
 ) {
     val summary: String
-        get() = listOf(finish.label, language?.nativeName ?: "Any language", setName ?: "Any set").joinToString(" · ")
+        get() = listOf(finish.label, language?.chipLabel ?: "Any language", setName ?: "Any set").joinToString(" · ")
 }
 
 /** Remembers the last setup so starting the next session is one tap. */

@@ -8,6 +8,17 @@ enum class Language(val label: String, val nativeName: String, val tcgProductLin
     ENGLISH("English", "English", "pokemon"),
     JAPANESE("Japanese", "日本語", "pokemon-japan"),
     CHINESE_SIMPLIFIED("Simplified Chinese", "简体中文", null),
+    ;
+
+    /** Short English name for tabs and chips ("Japanese", "Chinese"). */
+    val englishName: String get() = when (this) {
+        ENGLISH -> "English"
+        JAPANESE -> "Japanese"
+        CHINESE_SIMPLIFIED -> "Chinese"
+    }
+
+    /** "日本語 · Japanese"; English is just "English". */
+    val chipLabel: String get() = if (this == ENGLISH) englishName else "$nativeName · $englishName"
 }
 
 /** Display order of the groups on the home screen; the user's own sets come first. */

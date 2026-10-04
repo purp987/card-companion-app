@@ -184,7 +184,7 @@ fun SearchScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(listOf(Language.ENGLISH, Language.JAPANESE)) { l ->
-                    FilterChip(selected = state.language == l, onClick = { onLanguage(l) }, label = { Text(l.nativeName) })
+                    FilterChip(selected = state.language == l, onClick = { onLanguage(l) }, label = { Text(l.chipLabel) })
                 }
                 items(SearchSort.entries) { s ->
                     FilterChip(selected = state.sort == s, onClick = { onSort(s) }, label = { Text(s.label) })
@@ -265,7 +265,7 @@ private fun SetHitRow(set: PokemonSet, onPrices: () -> Unit, onCards: (() -> Uni
         Column(Modifier.weight(1f)) {
             Text(set.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                listOfNotNull(set.language.nativeName, set.code, set.localName, set.year.toString()).joinToString(" · "),
+                listOfNotNull(set.language.chipLabel, set.code, set.localName, set.year.toString()).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

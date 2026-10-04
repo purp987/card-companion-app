@@ -284,7 +284,14 @@ fun LanguageSelector(selected: Language, onSelect: (Language) -> Unit) {
                 shape = SegmentedButtonDefaults.itemShape(index, Language.entries.size),
                 icon = {},
             ) {
-                Text(language.nativeName, maxLines = 1, modifier = Modifier.semantics { contentDescription = language.label })
+                if (language == Language.ENGLISH) {
+                    Text(language.nativeName, maxLines = 1, modifier = Modifier.semantics { contentDescription = language.label })
+                } else {
+                    androidx.compose.foundation.layout.Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Text(language.nativeName, maxLines = 1, modifier = Modifier.semantics { contentDescription = language.label })
+                        Text(language.englishName, maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }

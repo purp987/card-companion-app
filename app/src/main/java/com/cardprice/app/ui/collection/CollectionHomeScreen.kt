@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import com.cardprice.app.data.Language
+import com.cardprice.app.data.SetNames
 import com.cardprice.app.data.collection.CardSeries
 import com.cardprice.app.data.collection.CardSet
 import com.cardprice.app.data.market.Load
@@ -181,7 +182,8 @@ private fun SetCatalogGrid(
                 item(key = "h_started", span = full) { SectionHeader("Collecting now", null) }
                 itemsIndexed(hits, key = { _, (set, _) -> "started_${set.id}" }) { i, (set, p) ->
                     val art = collectionSetArt(language, set, seriesOf[set.id]?.id)
-                    SetTile(art, set.id, set.name, cardCount(set), p, i) { onOpenSet(set, art) }
+                    val english = SetNames.english(language, set.id)
+                    SetTile(art, set.id, english ?: set.name, cardCount(set), p, i, localName = set.name.takeIf { english != null }) { onOpenSet(set.withEnglishName(language), art) }
                 }
             }
         }
@@ -192,7 +194,10 @@ private fun SetCatalogGrid(
             item(key = "h_${s.id}", span = full) { SectionHeader(s.name, "${sets.size} ${if (sets.size == 1) "set" else "sets"}") }
             itemsIndexed(sets, key = { _, set -> "${s.id}_${set.id}" }) { i, set ->
                 val art = collectionSetArt(language, set, s.id)
-                SetTile(art, set.id, set.name, cardCount(set), collection.progressFor(language, set.id), i) { onOpenSet(set, art) }
+                val english = SetNames.english(language, set.id)
+                SetTile(art, set.id, english ?: set.name, cardCount(set), collection.progressFor(language, set.id), i, localName = set.name.takeIf { english != null }) {
+                    onOpenSet(set.withEnglishName(language), art)
+                }
             }
         }
         if (q.isNotEmpty() && series.none { it.sets.any(::matches) }) {
@@ -222,10 +227,11 @@ private fun CollectingNowCarousel(
         val series = seriesOf[set.id]
         val art = collectionSetArt(language, set, series?.id)
         val offset = ((pager.currentPage - page) + pager.currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f)
+        val english = SetNames.english(language, set.id)
         SetHeroCard(
             art = art,
-            title = set.name,
-            subtitle = listOfNotNull(series?.name, language.nativeName).joinToString(" · "),
+            title = english ?: set.name,
+            subtitle = listOfNotNull(set.name.takeIf { english != null }, series?.name, language.chipLabel).joinToString(" · "),
             progress = progress,
             modifier = Modifier.graphicsLayer {
                 val scale = lerp(1f, 0.92f, offset)
@@ -233,9 +239,13 @@ private fun CollectingNowCarousel(
                 scaleY = scale
                 alpha = lerp(1f, 0.7f, offset)
             },
-        ) { onOpenSet(set, art) }
+        ) { onOpenSet(set.withEnglishName(language), art) }
     }
 }
+
+/** Japanese and Chinese sets open under their English name, with the original after it. */
+private fun CardSet.withEnglishName(language: Language): CardSet =
+    SetNames.english(language, id)?.let { copy(name = "$it · $name") } ?: this
 
 @Composable
 private fun SectionHeader(title: String, detail: String?) {

@@ -259,6 +259,8 @@ fun SetTile(
     cardCount: Int,
     progress: SetProgress?,
     index: Int,
+    /** The set's own name when [name] is an English translation (Japanese and Chinese sets). */
+    localName: String? = null,
     onClick: () -> Unit,
 ) {
     val tint = rememberArtColor(art) ?: MaterialTheme.colorScheme.primary
@@ -290,7 +292,7 @@ fun SetTile(
         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text(name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                listOfNotNull(setId, cardCount.takeIf { it > 0 }?.let { "$it cards" }).joinToString(" · "),
+                listOfNotNull(setId, localName ?: cardCount.takeIf { it > 0 }?.let { "$it cards" }).joinToString(" · "),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

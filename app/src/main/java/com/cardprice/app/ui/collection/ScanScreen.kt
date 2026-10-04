@@ -624,7 +624,7 @@ private fun SetupPanel(
                         language = l
                         if (set != null && recentSets.none { it.first == l && it.second == set!!.first }) set = null
                     },
-                    label = { Text(l.nativeName) },
+                    label = { Text(l.chipLabel) },
                 )
             }
         }

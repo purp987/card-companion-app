@@ -502,7 +502,7 @@ private fun CardPicker(vm: InventoryViewModel, onPick: (CardHit) -> Unit) {
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 6.dp)) {
             listOf(Language.ENGLISH, Language.JAPANESE).forEach { l ->
-                FilterChip(selected = language == l, onClick = { language = l }, label = { Text(l.nativeName) })
+                FilterChip(selected = language == l, onClick = { language = l }, label = { Text(l.chipLabel) })
             }
         }
         when (val r = results) {
@@ -538,7 +538,7 @@ private fun SealedPicker(vm: InventoryViewModel, allSets: List<PokemonSet>, onPi
             LazyColumn(Modifier.heightIn(max = 480.dp)) {
                 items(SetSearch.find(allSets.filter { it.language != Language.CHINESE_SIMPLIFIED }, query), key = { it.id }) { s ->
                     Text(
-                        "${s.name} · ${s.language.nativeName} · ${s.year}",
+                        "${s.name} · ${s.language.chipLabel} · ${s.year}",
                         modifier = Modifier.fillMaxWidth().clickable { set = s }.padding(vertical = 12.dp),
                     )
                     HorizontalDivider()
