@@ -3,6 +3,7 @@ package com.cardprice.app
 import android.app.Application
 import android.net.Uri
 import android.os.Bundle
+import com.cardprice.app.data.collection.CardPhotos
 import com.cardprice.app.ui.money
 import com.cardprice.app.ui.display
 import com.cardprice.app.ui.appVersion
@@ -98,6 +99,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         ScanLog.init(filesDir)
         ScanLog.installCrashHandler()
+        CardPhotos.init(filesDir)
         // Beta: resume streaming to the live viewer if it was on.
         LiveStream.refresh(this)
         enableEdgeToEdge()
@@ -312,6 +314,8 @@ class MainActivity : ComponentActivity() {
                                 onCameraText = scanVm::onCameraText,
                                 onPhotoText = scanVm::onPhotoText,
                                 onPhotoError = scanVm::onPhotoError,
+                                onCardFrame = scanVm::onCardFrame,
+                                onPhotoBitmap = scanVm::onPhotoBitmap,
                                 onChoose = scanVm::choose,
                                 onNext = scanVm::next,
                                 onSetCount = { r, key, count ->

@@ -71,6 +71,9 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.cardprice.app.data.Language
 import com.cardprice.app.data.collection.CardPrices
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.collectAsState
+import com.cardprice.app.data.collection.CardPhotos
 import com.cardprice.app.data.collection.CollectionCard
 import com.cardprice.app.data.collection.PokeCottage
 import com.cardprice.app.data.collection.SetSubsets
@@ -125,6 +128,8 @@ fun CollectionSetScreen(
     // Index into the shown cards of the one open full screen.
     var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     val cards = (cardsState.cards as? Load.Ready)?.value
+    // Pictures you add (from scans or the gallery) show up straight away.
+    val photoRevision by CardPhotos.revision.collectAsState()
     LaunchedEffect(cards) { cards?.let(onCardsLoaded) }
     LaunchedEffect(cards) {
         if (focusHandled || cards == null || (focusNumber == null && focusName == null)) return@LaunchedEffect
@@ -195,7 +200,7 @@ fun CollectionSetScreen(
                         item {
                             SetHeader(
                                 language, setId, setName,
-                                art + listOfNotNull(all.firstOrNull { it.image != null }?.imageUrl("low")),
+                                art + listOfNotNull(all.firstNotNullOfOrNull { it.image?.let { _ -> it.imageUrl("low") } }),
                                 value = value ?: SetValue.NONE,
                                 pricing = cardsState.pricing,
                                 ownedCards = all.count(::owned),
@@ -297,6 +302,7 @@ fun CollectionSetScreen(
                         if (gallery) {
                             items(shown.chunked(GALLERY_COLUMNS), key = { row -> "row-" + row.first().id }) { row ->
                                 row.forEach { card -> if (!card.placeholder) LaunchedEffect(card.id) { onRowPrice(card.id) } }
+                                photoRevision.let { } // redraw when a picture is added
                                 ShowcaseRow(
                                     cards = row.map { showcaseCard(it, setName, cardsState.prices[it.id]) { key -> count(it.id, key) } },
                                     columns = GALLERY_COLUMNS,
@@ -306,6 +312,7 @@ fun CollectionSetScreen(
                         }
                         if (!gallery) items(shown, key = { it.id }) { card ->
                             if (!card.placeholder) LaunchedEffect(card.id) { onRowPrice(card.id) }
+                            photoRevision.let { } // redraw when a picture is added
                             CardRow(
                                 card = card,
                                 prices = cardsState.prices[card.id],
@@ -609,9 +616,12 @@ private fun CardDetailSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         LazyColumn(contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 32.dp)) {
             item {
+                val revision by CardPhotos.revision.collectAsState()
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    revision.let { }
                     CardImage(card.imageUrl("high"), Modifier.height(320.dp))
                 }
+                if (card.image == null) OwnPhotoButtons(card)
                 Text(card.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
                 Text(
                     listOfNotNull("#${card.number}", card.rarity).joinToString(" · "),
@@ -677,11 +687,42 @@ private fun showcaseCard(card: CollectionCard, setName: String, prices: CardPric
         key = card.id,
         name = card.name,
         caption = listOfNotNull(setName, "#${card.number}", card.rarity).joinToString(" · "),
-        image = card.image?.let { card.imageUrl("low") },
-        imageLarge = card.image?.let { card.imageUrl("high") },
+        image = card.imageUrl("low"),
+        imageLarge = card.imageUrl("high"),
         owned = copies > 0,
         shiny = copies > 0 && shiny,
         badge = if (copies > 0) "×$copies" else null,
         price = price,
     )
+}
+
+/**
+ * For cards with no picture from the card databases: use a photo from the gallery (or remove the one
+ * you added). Scanning such a card saves the scan as its picture by itself.
+ */
+@Composable
+private fun OwnPhotoButtons(card: CollectionCard) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val revision by CardPhotos.revision.collectAsState()
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { loadBitmap(context, uri) }.getOrNull()?.let { if (CardPhotos.save(card.id, it)) CardPhotos.changed() }
+        }
+    }
+    revision.let { }
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+        OutlinedButton(onClick = {
+            pick.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }) { Text(if (CardPhotos.has(card.id)) "Change photo…" else "Use a photo…") }
+        if (CardPhotos.has(card.id)) TextButton(onClick = { CardPhotos.delete(card.id) }) { Text("Remove photo") }
+    }
+    if (!CardPhotos.has(card.id)) {
+        Text(
+            "No picture in the card databases yet. Scanning this card saves the scan as its picture.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        )
+    }
 }

@@ -6,6 +6,7 @@ import java.io.File
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cardprice.app.data.collection.CollectionStore
+import com.cardprice.app.data.collection.CardPhotos
 import com.cardprice.app.data.market.userMessage
 import com.cardprice.app.data.scan.AutoAddPolicy
 import com.cardprice.app.data.scan.ScanConfidence
@@ -389,6 +390,8 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             ignored("same reading as the last miss", clues.summary)
             return
         }
+        // Remember what the camera saw for this reading, in case the card turns out to have no picture.
+        lookupFrame = latestCardFrame
         lookUp(clues.summary, fromPhoto = false) { resolver.identify(clues, setup, learning) }
     }
 
@@ -402,6 +405,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         lastMiss = null
+        lookupFrame = photoFrame
         lookUp(clues.summary, fromPhoto = true) { resolver.identify(clues, setup, learning) }
     }
 
@@ -468,6 +472,27 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         ScanLog.d("scanner closed")
         super.onCleared()
+    }
+
+    // ---- Pictures for cards that have none (e.g. Simplified Chinese cards): the scan itself.
+    @Volatile private var latestCardFrame: android.graphics.Bitmap? = null
+    @Volatile private var photoFrame: android.graphics.Bitmap? = null
+    private var lookupFrame: android.graphics.Bitmap? = null
+
+    fun onCardFrame(bitmap: android.graphics.Bitmap) { latestCardFrame = bitmap }
+    fun onPhotoBitmap(bitmap: android.graphics.Bitmap) { photoFrame = bitmap }
+
+    /** Saves the scan as the card's picture when it has none yet (its own, or one taken before). */
+    private fun savePictureIfMissing(result: ScanResult) {
+        val card = result.card
+        if (card.image != null || CardPhotos.has(card.id)) return
+        val frame = lookupFrame ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            if (CardPhotos.save(card.id, frame)) {
+                ScanLog.d("saved the scan as the picture for ${card.id}")
+                CardPhotos.changed()
+            }
+        }
     }
 
     /** Back to scanning. */
@@ -613,6 +638,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         ScanLog.d("decision for $cardId: ${decision.javaClass.simpleName} (auto-add ${_autoAdd.value}, finish ${_setup.value.finish})")
         when (decision) {
             is ScanDecision.AutoAdd -> {
+                savePictureIfMissing(best)
                 addCopies(best, decision.variantKey, 1)
                 record(best, decision.variantKey, 1, ScanAction.AUTO_ADDED)
                 sameCard.onAdded(cardId)
@@ -646,6 +672,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         if (delta == 0) return
         ScanLog.d("manual ${if (delta > 0) "+" else ""}$delta ${result.card.id} ${variantKey}")
         if (delta > 0) {
+            savePictureIfMissing(result)
             // Same confirmation as an automatic add.
             _manualAdded.value = ManualAdded(result, variantKey, System.nanoTime())
             // Later copies of this card get the same version without asking, and this copy

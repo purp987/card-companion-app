@@ -133,6 +133,10 @@ fun ScanScreen(
     onSkip: () -> Unit,
     /** Camera problems (stalls, restarts) for the scan log. */
     onCameraEvent: (String) -> Unit,
+    /** The card inside the on-screen frame, from the latest camera reading (kept for cards with no picture). */
+    onCardFrame: (Bitmap) -> Unit = {},
+    /** A photo picked for scanning (kept as the picture of a card with none). */
+    onPhotoBitmap: (Bitmap) -> Unit = {},
     onAddAnother: (ScanStatus.AutoAdded) -> Unit,
     onOpenHistory: () -> Unit,
     setup: ScanSetup,
@@ -183,7 +187,7 @@ fun ScanScreen(
             val page = runCatching { loadBitmap(context, uri) }.getOrNull()
             if (page == null) onPhotoError("Couldn't open that photo.") else readBinderPage(page)
         } else {
-            recognizePhoto(context, uri, onPhotoText, onPhotoError)
+            recognizePhoto(context, uri, onPhotoBitmap, onPhotoText, onPhotoError)
         }
     }
     DisposableEffect(Unit) {
@@ -235,6 +239,8 @@ fun ScanScreen(
                         onCaptureReady = { imageCapture = it },
                         onMotion = { if (!choosing) onMotion() },
                         onCameraEvent = onCameraEvent,
+                        onCardFrame = onCardFrame,
+                        boxAspect = { cameraAspect },
                         // Frames keep being read while a suggestion is up, so reading another card replaces it.
                         // The view model decides what to do with each reading (including while a lookup runs).
                         onText = { if (!choosing) onCameraText(it) },
@@ -711,7 +717,11 @@ private fun CameraPreview(
     onMotion: () -> Unit,
     onText: (List<String>) -> Unit,
     onCameraEvent: (String) -> Unit = {},
+    onCardFrame: (Bitmap) -> Unit = {},
+    boxAspect: () -> Float = { 1f },
 ) {
+    val latestOnCardFrame by androidx.compose.runtime.rememberUpdatedState(onCardFrame)
+    val latestBoxAspect by androidx.compose.runtime.rememberUpdatedState(boxAspect)
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
@@ -774,6 +784,9 @@ private fun CameraPreview(
                     return@setAnalyzer
                 }
                 lastRun = now
+                // The card inside the frame, for saving as the picture of a card that has none.
+                runCatching { cardInFrame(proxy.toBitmap(), proxy.imageInfo.rotationDegrees, latestBoxAspect()) }
+                    .getOrNull()?.let { latestOnCardFrame(it) }
                 val task = runCatching { recognizer.process(InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)) }
                     .onFailure { e -> main.execute { latestOnCameraEvent("text recognition couldn't start: $e") } }
                     .getOrNull()
@@ -811,11 +824,12 @@ private fun CameraPreview(
     AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 }
 
-private fun recognizePhoto(context: Context, uri: Uri, onLines: (List<String>) -> Unit, onError: (String) -> Unit) {
+private fun recognizePhoto(context: Context, uri: Uri, onBitmap: (Bitmap) -> Unit, onLines: (List<String>) -> Unit, onError: (String) -> Unit) {
     val bitmap = runCatching { loadBitmap(context, uri) }.getOrNull() ?: run {
         onError("Couldn't open that photo.")
         return
     }
+    onBitmap(bitmap)
     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     recognizer.process(InputImage.fromBitmap(bitmap, 0))
         .addOnSuccessListener { full ->
@@ -889,3 +903,25 @@ internal fun MlText.linesTopToBottom(): List<String> =
 
 private fun hasCameraPermission(context: Context) =
     ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+/**
+ * The part of a camera frame inside the on-screen card frame: the frame upright, cut to what the
+ * preview shows (it fills a box of [boxAspect] width/height), then the card guide (86% of that height,
+ * card-shaped) from its centre, scaled down to keep memory small.
+ */
+private fun cardInFrame(frame: Bitmap, rotationDegrees: Int, boxAspect: Float): Bitmap {
+    val upright = if (rotationDegrees == 0) frame else {
+        val m = android.graphics.Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+        Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, m, true)
+    }
+    val w = upright.width.toFloat()
+    val h = upright.height.toFloat()
+    val visibleH = if (boxAspect > 0f && w / h > boxAspect) h else w / boxAspect.coerceAtLeast(0.01f)
+    val guideH = (visibleH * 0.86f).coerceAtMost(h)
+    val guideW = (guideH * 0.716f).coerceAtMost(w)
+    val left = ((w - guideW) / 2).toInt().coerceAtLeast(0)
+    val top = ((h - guideH) / 2).toInt().coerceAtLeast(0)
+    val crop = Bitmap.createBitmap(upright, left, top, guideW.toInt().coerceAtMost(upright.width - left), guideH.toInt().coerceAtMost(upright.height - top))
+    val targetH = 720
+    return if (crop.height > targetH) Bitmap.createScaledBitmap(crop, (crop.width * targetH.toFloat() / crop.height).toInt(), targetH, true) else crop
+}

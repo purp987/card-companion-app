@@ -68,7 +68,7 @@ object CollectionLink {
                 setName = setNames(parts.language, parts.setId) ?: parts.setId,
                 language = parts.language,
                 number = card?.number ?: parts.cardId.substringAfterLast('-'),
-                image = card?.takeIf { it.image != null }?.imageUrl("low"),
+                image = card?.imageUrl("low"),
                 finish = variant?.label ?: parts.variantKey,
                 condition = CardCondition.NM,
                 quantity = quantity,

@@ -36,10 +36,16 @@ data class CollectionCard(
     /** TCGplayer market price (USD) when the card list came from TCGplayer rather than TCGdex. */
     val marketPrice: Double? = null,
 ) {
-    /** Image URL at "low" (list) or "high" (detail) quality, for either image source. */
+    /**
+     * Image URL at "low" (list) or "high" (detail) quality, for either image source; for cards with no
+     * picture of their own, one you took ([CardPhotos]).
+     */
     fun imageUrl(quality: String): String? = image?.let {
         if (it.startsWith(TCGPLAYER_IMAGE_PREFIX)) "${it}_${if (quality == "high") "400" else "200"}w.jpg" else "$it/$quality.webp"
-    }
+    } ?: CardPhotos.uriFor(id)
+
+    /** True when the picture is one you took rather than one from the card databases. */
+    val usesOwnPhoto: Boolean get() = image == null && CardPhotos.has(id)
 }
 
 /** One collectible printing of a card, e.g. a Poké Ball reverse holo. [key] is stable for storage. */
