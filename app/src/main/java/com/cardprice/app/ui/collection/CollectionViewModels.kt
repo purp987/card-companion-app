@@ -21,6 +21,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import com.cardprice.app.data.cloud.ChinesePictures
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -306,7 +307,9 @@ class SetCardsViewModel(application: Application, private val language: Language
                     _state.update { it.copy(progress = done to total) }
                 }
                 // Some TCGdex sets (e.g. the 30th Celebration Classic Collection) have no pictures; TCGplayer does.
-                val cards = ImageFill.fillMissing(language, setId, loaded)
+                val filled = ImageFill.fillMissing(language, setId, loaded)
+                // Beta, paired with the owner's server: names for Simplified Chinese placeholders.
+                val cards = if (language == Language.CHINESE_SIMPLIFIED) ChinesePictures.withNames(getApplication(), setId, filled) else filled
                 // Numbered placeholders aren't cached, so real card data shows up as soon as TCGdex adds it.
                 if ((cached == null || cards != cached) && cards.any { !it.placeholder }) {
                     withContext(Dispatchers.IO) { store.cacheCards(language, setId, cards) }
@@ -322,6 +325,10 @@ class SetCardsViewModel(application: Application, private val language: Language
                 .mapNotNull { c -> c.marketPrice?.let { c.id to CardPrices(c.variants.associate { v -> v.key to VariantPrice(it, "USD", "TCGplayer") }) } }
                 .toMap()
             _state.update { SetCardsState(cards = result, prices = it.prices + listPrices) }
+            // ...and their pictures, fetched in the background (screens redraw as they arrive).
+            if (language == Language.CHINESE_SIMPLIFIED && result is Load.Ready) {
+                viewModelScope.launch { runCatching { ChinesePictures.download(getApplication(), setId, result.value) } }
+            }
         }
     }
 }

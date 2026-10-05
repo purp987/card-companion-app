@@ -105,6 +105,30 @@ class CloudApi(private val baseUrl: String, private val token: String? = null, p
         call("POST", "/v1/live/events", body)
     }
 
+    /** Beta: the card names the server has for a Simplified Chinese set ({"cards": [{number, name}]}). */
+    fun chineseSet(setCode: String): JSONObject = call("GET", "/v1/cn/sets/${enc(setCode)}", null)
+
+    /** Beta: one Simplified Chinese card's picture, or null if the server has none. */
+    fun chineseImage(setCode: String, number: Int): ByteArray? {
+        val path = "/v1/cn/sets/${enc(setCode)}/$number/image"
+        val fullPath = (java.net.URI(baseUrl).rawPath ?: "").trimEnd('/') + path
+        val conn = java.net.URL(baseUrl + path).openConnection() as java.net.HttpURLConnection
+        try {
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 30_000
+            if (deviceId != null) DeviceKey.signHeaders(deviceId, "GET", fullPath, ByteArray(0)).forEach { (k, v) -> conn.setRequestProperty(k, v) }
+            return when (val code = conn.responseCode) {
+                200 -> conn.inputStream.use { it.readBytes() }
+                404 -> null
+                else -> throw CloudException("The server couldn't send that picture (HTTP $code).")
+            }
+        } catch (e: java.io.IOException) {
+            throw CloudException(e.userMessage())
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /** Creates an account; returns the sign-in token. */
     fun register(email: String, password: String, signupCode: String, device: String): String =
         call("POST", "/v1/auth/register", JSONObject().put("email", email).put("password", password).put("signupCode", signupCode).put("device", device))
