@@ -1,0 +1,4 @@
+<resources>
+    <!-- Beta builds may talk to a test server on this computer over plain http (adb reverse). -->
+    <bool name="allow_local_http">true</bool>
+</resources>

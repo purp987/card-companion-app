@@ -31,7 +31,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.async
 import com.cardprice.app.data.collection.CardPrices
 import com.cardprice.app.data.collection.VariantPrice
-import com.cardprice.app.data.collection.TcgdexApi
+import com.cardprice.app.data.vault.ResolveRequest
+import com.cardprice.app.data.vault.ScanSync
+import com.cardprice.app.data.vault.ScanTarget
+import com.cardprice.app.data.vault.SyncNote
+import com.cardprice.app.data.vault.Vault
+import com.cardprice.app.data.vault.VariantMap
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.update
 import com.cardprice.app.data.scan.ScanLog
@@ -174,21 +180,47 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Uses the collection's price cache (a day old at most), else asks TCGdex; cards from TCGplayer carry their price. */
+    /** Server side of the scanner: resolves cards, adds them to the portfolio, queues them when offline. */
+    private val sync = ScanSync(
+        api = Vault.api,
+        pending = Vault.pending,
+        portfolio = Vault::scanPortfolio,
+        today = Vault::today,
+        onHoldingsChanged = Vault::holdingsChanged,
+    )
+    /** Owned copies per "LANGUAGE|set|card|variant" in the scanner's portfolio. */
+    val counts: StateFlow<Map<String, Int>> = sync.counts
+    /** What happened on the server for the last change ("Added to TCG Vault", "Offline: saved…"). */
+    val syncNote: StateFlow<SyncNote?> = sync.note
+
+    /** Portfolio changes run one at a time, in the order they were made (add, then undo). */
+    private val changes = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+
+    init {
+        // Declared after the fields it uses, so it starts once they exist.
+        viewModelScope.launch { for (change in changes) change() }
+    }
+
+    fun count(result: ScanResult, variantKey: String): Int = sync.count(target(result), variantKey)
+
+    /** Looks the card up on TCG Vault and shows its market price per version (USD). */
     private fun ensurePrice(result: ScanResult) {
         val card = result.card
         if (card.placeholder || card.id in _prices.value || !requestedPrices.add(card.id)) return
-        card.marketPrice?.let { price ->
-            val listed = CardPrices(card.variants.associate { it.key to VariantPrice(price, "USD", "TCGplayer") })
-            _prices.update { it + (card.id to listed) }
-            return
-        }
-        val language = result.set.language
         viewModelScope.launch {
-            val cached = withContext(Dispatchers.IO) { store.cachedPrices(language, PRICE_MAX_AGE_MS)[card.id] }
-            val prices = cached ?: runCatching { TcgdexApi.cardPrices(language, card.id) }.getOrNull()
-                ?.also { fetched -> withContext(Dispatchers.IO) { store.cachePrices(language, mapOf(card.id to fetched)) } }
-            if (prices == null) requestedPrices.remove(card.id) else _prices.update { it + (card.id to prices) }
+            sync.prefetch(target(result), card.variants.map { it.key })
+            val match = sync.matches.value[target(result).key]
+            if (match == null) {
+                requestedPrices.remove(card.id)
+                return@launch
+            }
+            val prices = CardPrices(
+                card.variants.mapNotNull { v ->
+                    val price = VariantMap.pick(match.variants, v.key)?.market ?: match.product.price.takeIf { card.variants.size == 1 }
+                    price?.let { v.key to VariantPrice(it, "USD", "TCG Vault") }
+                }.toMap(),
+            )
+            _prices.update { it + (card.id to prices) }
         }
     }
 
@@ -332,8 +364,31 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         _choosing.value = true
     }
 
-    /** Adds [delta] copies of a variant to the collection; supplied by the screen. */
-    var addCopies: (ScanResult, variantKey: String, delta: Int) -> Unit = { _, _, _ -> }
+    /** Adds (or with a negative [delta], takes back) copies of a version in the TCG Vault portfolio. */
+    private fun addCopies(result: ScanResult, variantKey: String, delta: Int) {
+        if (delta == 0) return
+        val t = target(result)
+        changes.trySend { sync.change(t, variantKey, delta) }
+    }
+
+    /** Tap-to-add / hold-to-remove on a result: sets the owned count of one version. */
+    fun setCount(result: ScanResult, variantKey: String, count: Int) {
+        val delta = count - count(result, variantKey)
+        addCopies(result, variantKey, delta)
+        recordManual(result, variantKey, delta)
+    }
+
+    private fun target(r: ScanResult) = ScanTarget(
+        key = "${r.set.language.name}|${r.set.setId}|${r.card.id}",
+        request = ResolveRequest(
+            lang = VariantMap.langCode(r.set.language),
+            setCode = r.set.setId,
+            setName = r.setName,
+            number = r.card.number,
+            name = r.card.name,
+        ),
+        label = "${r.card.name} (${r.setName} #${r.card.number})",
+    )
 
     private var busy = false
     /** Last reading that found nothing, so the camera doesn't look the same thing up every frame. */

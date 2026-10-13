@@ -34,6 +34,20 @@ data class PriceChartingPrice(
     val price: Double?,
 )
 
+/** PriceCharting's prices for one product (USD). Cards: ungraded, Grade 9, PSA 10, BGS 10; sealed: its sealed price. */
+data class PriceChartingProduct(
+    val id: String,
+    val productName: String,
+    val consoleName: String,
+    val ungraded: Double?,
+    val grade9: Double?,
+    val psa10: Double?,
+    val bgs10: Double?,
+    val sealedPrice: Double?,
+) {
+    val hasPrices: Boolean get() = listOfNotNull(ungraded, grade9, psa10, bgs10, sealedPrice).isNotEmpty()
+}
+
 sealed interface Load<out T> {
     data object Loading : Load<Nothing>
     data class Ready<T>(val value: T) : Load<T>

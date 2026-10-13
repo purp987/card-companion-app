@@ -22,14 +22,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.cardprice.app.data.JapaneseSets
 import com.cardprice.app.data.Language
 import com.cardprice.app.data.PokemonSet
 import com.cardprice.app.data.SetArtwork
-import com.cardprice.app.data.SetCatalog
-import com.cardprice.app.data.collection.CardSet
-import com.cardprice.app.data.collection.SetValue
-import com.cardprice.app.data.collection.tcgdexCode
 
 /**
  * A set's picture for pickers: tries each image in [urls] in order (e.g. pack art, then logo), and
@@ -65,31 +60,6 @@ fun SetArt(urls: List<String>, label: String, color: Color, modifier: Modifier =
     }
 }
 
-/** Pictures for a TCGdex set in the collection picker, best first; the set's first card is the last resort. */
-fun collectionSetArt(language: Language, set: CardSet, seriesId: String?): List<String> {
-    val firstCard = seriesId?.let { series ->
-        listOf("001", "1").map { "https://assets.tcgdex.net/${language.tcgdexCode}/$series/${set.id}/$it/low.webp" }
-    }.orEmpty()
-    return when (language) {
-        Language.ENGLISH -> listOfNotNull(
-            set.logo?.let { "$it.webp" },
-            SetArtwork.collectionImage(set.id),
-            SetArtwork.packImage(SetCatalog.sets.firstOrNull { it.name.equals(set.name, ignoreCase = true) }?.tcgSlug),
-            set.symbol?.let { "$it.webp" },
-            SetArtwork.fallbackImage(language, set.id),
-        ) + firstCard
-        // TCGdex's Japanese set ids are the printed codes (SV2a, M6…), which the calculator catalog also uses.
-        Language.JAPANESE -> listOfNotNull(
-            SetArtwork.collectionImage(set.id),
-            SetArtwork.packImage(JapaneseSets.sets.firstOrNull { it.code.equals(set.id, ignoreCase = true) }?.tcgSlug),
-            set.symbol?.let { "$it.webp" },
-            SetArtwork.fallbackImage(language, set.id),
-        ) + firstCard
-        // TCGdex has no images for mainland Chinese sets; the badge shows the set code.
-        Language.CHINESE_SIMPLIFIED -> emptyList()
-    }
-}
-
 /** Pictures for a calculator set, matching what the collection shows for the same set. */
 fun calculatorSetArt(set: PokemonSet): List<String> = when (set.language) {
     Language.ENGLISH -> {
@@ -103,15 +73,6 @@ fun calculatorSetArt(set: PokemonSet): List<String> = when (set.language) {
     }
     Language.JAPANESE -> listOfNotNull(SetArtwork.packImage(set.tcgSlug))
     Language.CHINESE_SIMPLIFIED -> emptyList()
-}
-
-/** "$12.34", "€5.60" or "$12.34 + €5.60"; null when nothing is priced. */
-fun SetValue.display(): String? {
-    val parts = listOfNotNull(
-        usd.takeIf { it > 0 }?.let { formatCurrency(it, "USD") },
-        eur.takeIf { it > 0 }?.let { formatCurrency(it, "EUR") },
-    )
-    return parts.takeIf { it.isNotEmpty() }?.joinToString(" + ")
 }
 
 fun formatCurrency(amount: Double, currency: String): String =

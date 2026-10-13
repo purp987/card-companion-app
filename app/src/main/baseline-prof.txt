@@ -1,0 +1,19 @@
+# Hand-written baseline profile: AOT-compile the app's own code and the Compose/Coil code paths used
+# at startup and while scrolling Home, Explore, sets, Portfolio and the calculator.
+HSPLcom/cardprice/app/MainActivity**->**(**)**
+HSPLcom/cardprice/app/ui/**->**(**)**
+HSPLcom/cardprice/app/data/vault/**->**(**)**
+HSPLcom/cardprice/app/data/**->**(**)**
+HSPLcom/cardprice/app/update/**->**(**)**
+HSPLandroidx/compose/runtime/**->**(**)**
+HSPLandroidx/compose/ui/**->**(**)**
+HSPLandroidx/compose/foundation/**->**(**)**
+HSPLandroidx/compose/material3/**->**(**)**
+HSPLandroidx/compose/animation/**->**(**)**
+HSPLandroidx/navigation/**->**(**)**
+HSPLandroidx/lifecycle/**->**(**)**
+HSPLcoil/**->**(**)**
+HSPLkotlinx/coroutines/**->**(**)**
+Lcom/cardprice/app/**;
+Landroidx/compose/**;
+Lcoil/**;

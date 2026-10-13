@@ -1,35 +1,50 @@
 # Card Companion
 
-Android app (Kotlin + Jetpack Compose) for Pokémon TCG collectors: work out what packs really cost per card, and track your collection set by set, down to every variant.
+Android app (Kotlin + Jetpack Compose) for Pokémon TCG collectors. It's the phone client of **TCG Vault**, the owner's self-hosted price tracker: the server holds the catalog, prices, portfolios and watchlists; the app adds the **card scanner** and the **pack calculator**, and mirrors the rest of the web app in its dark "deep sea" look.
 
-## Sections
-The bottom bar switches between three areas:
+## Architecture
+- **Server-backed.** Everything except the scanner's on-device reading and the calculator's own set list comes from TCG Vault over its JSON API (`docs/app-api.md` in the server repo). The client is `data/vault/VaultApi.kt` (plain `HttpURLConnection`, `org.json`); `data/vault/Vault.kt` holds the settings, connection state, currency rates and the offline queue.
+- **Auth.** Every request sends `Authorization: Bearer <token>`. The token comes from pairing and is stored encrypted with an Android Keystore key (`data/SecretStore.kt`). `/api/app/*` routes need it; the catalog routes work without it.
+- **Offline.** Cards scanned while the server can't be reached are kept in `files/vault/pending-adds.json` and sent in order when it's back (`data/vault/PendingAdds.kt`). Settings shows the queue and any scan the server couldn't match.
+- **Prices** are USD from the server and shown in the currency picked in Settings, converted with the server's daily rates (`/api/rates`).
+- **Look.** Material 3 dark theme from TCG Vault's CSS tokens (`ui/theme/Theme.kt`), Space Grotesk for headings and prices, Lato for text (bundled, SIL OFL; see `licenses/`).
 
-- **Home**: greeting, quick stats (cards collected, sets started, average price per card), shortcuts into each section, the sets you're collecting now, and your recent purchases. ⚙ Settings lives here.
-- **Pack Calculator**: pick a set (English, 日本語, 简体中文), choose a product and enter what you paid.
-  - Shows price per card and per pack, with optional sales tax.
-  - The result box turns green, amber or red depending on how the price compares with TCGplayer's market price.
-  - Live market prices, plus price and units-sold history graphs (1M / 3M / 6M / 1Y).
-  - Saved purchases, and your own custom sets.
-- **My Collection**: browse every set by era, open one and tap the variants you own. Each tap adds a copy (Normal ×3). Press and hold a variant, then confirm, to remove all its copies.
-  - Cards and master-set progress bars; filter by All / Missing / Owned, and switch Master set on to count every variant.
-  - Tap a card for its full image, a copy counter per variant, and that variant's price (TCGplayer USD, or Cardmarket EUR when there's no TCGplayer price).
-  - **Collection value** per set: copies owned × each variant's market price (TCGplayer, USD). Variants that only have Cardmarket prices, which is common for Japanese cards, are totalled separately in EUR rather than converted. Prices for owned cards are fetched when you open the set and cached for 24 hours. Each set's value shows in the set list and on Home, and Home adds them all up.
-  - Special subsets have their own filter and progress bar, such as 30th Celebration's **30 Pikachu** (#023–052). The 30th Classic Collection is tracked as its own set.
-  - Links to the set's PokeCottage card list and master-set guide.
-- **Card gallery** (beta): collection sets open as a gallery of big card pictures, three across. Owned cards are in full colour with a copy count and a holo sheen on foils; missing ones are greyed out. The ▦/☰ button switches between gallery and list (remembered). Tap a card for a full-screen view: swipe between cards, and tilt the phone to turn the card in 3D with a moving glare and a rainbow holo shimmer. Version buttons under the card add or remove copies.
-- **Inventory** (beta; its own tab and a Home shortcut): cards and sealed product held to sell or trade, kept apart from the collection.
-  - *Add* → **Card** (search TCGplayer, price included), **Sealed** (pick a set, then one of its products) or **By hand**.
-  - Each item has a quantity, cost each, condition (NM–DMG) or grade, version, asking price, where it's kept, notes, and a status: In stock, Listed or Sold. *Mark sold…* records the price; selling part of a stack keeps the rest in stock.
-  - The summary shows units in stock, market value and profit on paper, plus units sold, revenue and realized profit. ↻ updates market prices from TCGplayer.
-  - Search by name, set, number or location; filter by status and cards/sealed; switch to the gallery view.
-  - Saved in `files/inventory/inventory.json` with hourly rolling backups (last 20); a damaged file falls back to the newest backup.
-  - **From your collection** (`data/inventory/CollectionLink.kt`): the inventory also lists the collection's cards, with quantities that follow the collection as it changes. *Whole collection* (the default for now) lists every copy; *Extras only (bulk)* lists the copies past one of each version; *Off* hides them. Cost, condition, asking price, location and notes added to these items are kept (the count isn't editable). *Mark sold…* takes the sold copies out of the collection and keeps the sale as an inventory record. Their prices come from TCGdex (USD only).
-  - **Plan: inventory takes over the bulk.**
-    1. *Now:* the inventory mirrors the whole collection, so both views show the same cards.
-    2. *Next:* switch to *Extras only* by default. The collection keeps a set number of copies per version (1 to start, adjustable), and every copy past that is bulk in the inventory, ready to price, store and sell.
-    3. *Then:* bulk lives in the inventory alone. Scans and pack openings put keepers in the collection and extras straight into inventory. Bulk gets lots (e.g. "500 commons, Box B"), locations and bulk pricing, and syncs through the backup server.
-- **Card scanner** (Scan cards on Home, or the Scan button on the Collection tab): point the camera at a card, or tap *Photo* to scan a picture.
+## Screens
+Bottom bar: **Home · Explore · Scan · Portfolio · More**.
+- **Home**: TCG Vault's home rows (Vault Movers, On Your Radar, Rising Stars, Cooling Off, Worth the Rip, Fresh Off the Press, Modern Heavy Hitters, Still in the Shrink, On the Horizon, Big in Japan, The Grail Gallery…). "See all" opens the matching list. Pull to refresh.
+- **Explore**: search every tracked product; sort (best match, price, gainers, losers, newest, name), cards/sealed, game and minimum-price filters.
+- **Product**: price with change over 7D/2W/1M/3M/6M/1Y/MAX, chart per printing with the Cardmarket trend as a dashed line, current prices, your holdings (add/edit/remove), **Slab Prices**, **Across the Pond** (Cardmarket), **Japanese Twin** for Chinese cards, **Recent eBay Comps**, shop links, details, and the Chase List / Shrink Wrap Watch star. With a PriceCharting token, a **PriceCharting** card shows its ungraded/Grade 9/PSA 10/BGS 10 (or sealed) prices.
+- **Portfolio**: all portfolios or one; value, change and history chart, cost basis, **What's in the Vault** (cards/sealed/graded), **Crown Jewels**, and the holdings list (sort, edit, remove). Create, rename and delete portfolios.
+- **More**: Watchlists (**Chase List** = cards, **Shrink Wrap Watch** = sealed), Sets (English/Japanese/Chinese tabs, set pages with cards and sealed), Pack Calculator, Scan history, Settings.
+- **Settings**: server address, connection status, pairing, currency, which portfolio scans go to, the offline queue, scanner learning, the one-time import, PriceCharting token, debug log.
+
+## Connecting to TCG Vault
+1. Install **Tailscale** on the phone and sign in to the same tailnet as the computer running TCG Vault.
+2. The default server address comes from `tcgVault.serverUrl` in `local.properties` at build time (e.g. `tcgVault.serverUrl=https://<pc-name>.<tailnet>.ts.net:8443`, the Tailscale Serve address). It's kept out of the repository; without it the app asks for an address in Settings. Change it under ⚙ Settings → *TCG Vault server* if needed. Release builds only accept https; beta builds also accept `http://localhost:3000` through `adb reverse tcp:3000 tcp:3000`.
+3. In the TCG Vault web UI: **Settings → Phone app → Pair a phone**. Enter the 6-digit code in the app under Settings → *Pair this phone* (it's valid 10 minutes). The phone shows up in the web UI's list of paired devices, where it can be revoked.
+
+## Updates over the air
+The app updates itself from TCG Vault.
+- It asks `GET /api/app/update?appId=<package>&versionCode=<code>` when it starts or comes back to the front (at most every 6 hours), and from ⚙ Settings → **App updates → Check for updates**, which also shows the installed version.
+- A newer build shows a banner with its version and notes. **Update** downloads the APK with the pairing token (with progress), checks its SHA-256 against the published one (a mismatch deletes the file) and installs it with a PackageInstaller session. The app reopens afterwards.
+- The first time, Android asks to allow **Install unknown apps** for Card Companion β (the app opens that page) and confirms the install. On Android 12+ later updates install without a prompt, because the app is then its own installer.
+- An update must be signed with the same key as the installed app; otherwise Android refuses it and the app says so.
+
+**Publishing a build** (on the server PC):
+```
+./gradlew :app:assembleBeta
+cd E:\Projects\PersonalServer
+npm run publish-apk -- "E:\Projects\card pricing app\app\build\outputs\apk\beta\app-beta.apk" --notes "What's new"
+```
+Raise `versionCode` first; the script refuses builds that aren't newer or are signed with a different key.
+
+## Moving the old local collection
+Settings → **Move my collection to TCG Vault** reads the old collection (`files/collection/collection.json`) and inventory (`files/inventory/inventory.json`) without changing them. *Check matches* runs `/api/app/import` as a dry run and shows how many items match; *Import matched items* then sends the collection to the portfolio **Collection** and the inventory to **Inventory**. Importing again updates the same holdings instead of duplicating them. Sold inventory and inventory rows mirrored from the collection aren't sent.
+
+## Card scanner
+Everything on the phone works as before: Google ML Kit reads the card (offline), and the auto-add policy, set/finish/language setup, binder pages, motion and same-card handling and learning are unchanged. What changed is where cards go: each identified card is looked up on TCG Vault (`POST /api/app/resolve`) and added to the chosen portfolio (`POST /api/holdings`, Near Mint, today). **Undo**, **+1** and tap/hold on a version change that holding. Results show the server's market price per version and how many you own. Offline, adds are queued and sent later.
+
+- **Using it** (the Scan button in the middle of the bottom bar): point the camera at a card, or tap *Photo* to scan a picture.
   - On-device text recognition (Google ML Kit, offline) reads the set code and number at the bottom of the card, e.g. "PBL EN 111/084" or Japanese "SV2a 025/165", and looks the card up. Older cards that only print "215/203" are matched by set size plus the card's name.
   - Photos get extra enlarged passes over the bottom strip and the bottom-left corner, where the small print is.
   - **"What are you scanning?"** comes first (last choices remembered; *Change* reopens it).
@@ -62,28 +77,18 @@ The bottom bar switches between three areas:
   - Versions you pick are remembered across sessions.
   - Undoing a binder page only withdraws its confirmations (it doesn't mark the cards wrong).
   - ⚙ Settings shows what it has learned and can reset it.
-- **Scan history** (*History* in the scanner): every change the scanner makes, grouped by day with a daily total. That covers auto-added, added or removed by tapping, and undone. Tap an entry to open that card in its set. *Clear* only clears the list; cards stay in your collection.
-- **Search**
-  - *Home → Search all cards*: searches every English or Japanese card on TCGplayer, most popular (best-selling) first, or sorted by highest price. With no text it lists the most popular cards right now. Each result shows its market price and "You have N" if it's in your collection. Tapping a result opens it in its set; promos and one-off products open on TCGplayer instead. `data/search/TcgSetMap.kt` maps TCGplayer sets to the collection's sets.
-  - *In a set*: "Find a card by number or name" filters instantly. "111", "#111", "111/084" and "TG05" all work, as does part of a name.
-- **Cloud backup** (beta; ⚙ Settings → *Cloud backup…*): sign in to a [Card Companion server](https://github.com/purp987/card-companion-server), or create an account with an invite code. *Back up now* uploads the collection, inventory, scan learning and history, and settings such as purchases, favorites and custom sets. API tokens aren't included. Server backups are listed with their card counts and can be restored (the current collection is kept as a local backup first) or deleted. Server addresses must be HTTPS; beta builds may also use `http://localhost` through `adb reverse` for a test server.
-- **Trusted device and live viewer** (beta; ⚙ Settings → *Cloud backup…* → *This phone*): *Pair this phone* with a code from the server's control panel. The phone makes a key pair in the Android Keystore (`data/cloud/DeviceKey.kt`), and from then on every server request is signed with it, which servers set to "paired devices only" require. *Stream to live viewer* sends screens, scanner activity, collection changes, warnings and totals to the server's control panel every few seconds (`data/cloud/LiveStream.kt`). Only debuggable (beta) builds can stream.
-- **Restore points**: ⚙ Settings → *Save a restore point…* keeps a named copy of your collection that automatic backups never replace, such as "Manual entries".
-- **Backups**: before the collection is saved, the version being replaced is kept as a backup (at most once an hour, last 20 kept). If the collection file is ever missing or damaged, the app loads the newest backup and says so on Home. ⚙ Settings → *Restore a backup…* lists them. Restoring keeps your current collection as a backup too, so it can be undone.
-- **Set pictures** are the same everywhere (both set lists, set headers, Home). English sets use the TCGdex logo, then TCGplayer pack art, then the set symbol. Japanese sets use pack art. Simplified Chinese sets use a code badge.
+- **Scan history** (*History* in the scanner): every change the scanner made, by day. Tapping an entry opens that card's TCG Vault page.
+
+## Pack Calculator
+Pick a set (English, 日本語, 简体中文), choose a product and enter what you paid: price per card and per pack, with optional tax, saved purchases and your own sets, all kept on the phone.
+- Each calculator set is linked to its TCG Vault set (by printed code or name; *Not the right set? Choose another* picks one by hand) and its sealed products come from `/api/search?set=…&type=sealed`. The result turns green, amber or red against that market price (converted to your currency). Tapping a product opens its TCG Vault page with the price chart.
+- **PriceCharting** (optional): paste your API token in Settings to compare its sealed prices too.
+- **English**: 69 sets, XY through Mega Evolution. **Japanese**: 98 sets. **Simplified Chinese**: SV-era boosters, slim and jumbo boxes, Gem Packs (no market prices).
 
 ## Data sources
-- **TCGdex** ([tcgdex.dev](https://tcgdex.dev), MIT-licensed): set lists, card lists, card images, detailed variants (Poké Ball/Master Ball reverses, cosmos, stamps, 1st Edition, shadowless) and per-variant prices.
-  - English loads in bulk through GraphQL. Japanese and Chinese load card by card the first time a set is opened, then it's cached on the phone.
-  - TCGdex has only card counts for mainland Simplified Chinese sets, so those appear as numbered checklists until TCGdex adds the cards.
-- **PokeCottage**: its terms don't allow copying or storing its content, so the app only *links* to its card list and master-set guide pages (`data/collection/PokeCottage.kt`, generated from its sitemap).
-- **TCGplayer**: sealed-product market prices and sales history. It no longer issues public API keys, so the app reads the same endpoints tcgplayer.com's own pages use. They're undocumented and could change; failures show an error with a retry button.
-- **PriceCharting** (optional): paste your API token under ⚙ Settings.
-
-### Calculator set lists
-- **English**: 69 sets, XY through Mega Evolution.
-- **Japanese**: 98 sets. Box contents come from TCGplayer product descriptions.
-- **Simplified Chinese**: SV-era boosters with slim and jumbo boxes, plus Gem Packs. Calculator only; there's no market data for these.
+- **TCG Vault** (the owner's server): catalog, TCGplayer market prices and history, Cardmarket, graded prices, eBay comps, portfolios, watchlists.
+- **TCGdex** ([tcgdex.dev](https://tcgdex.dev), MIT): card lists the scanner matches against, cached on the phone.
+- **PriceCharting** (optional, your own token).
 
 ## Branches
 - **`release`**: the public version that's shared with others. Only tested, finished work lands here.
@@ -95,12 +100,15 @@ Open the folder in Android Studio and press Run, or use Gradle. The build needs 
 | Build | Command | Installs as |
 |---|---|---|
 | Public release | `./gradlew assembleRelease` | **Card Companion** (`com.cardprice.app`) |
-| Beta | `./gradlew assembleDebug` | **Card Companion β** (`com.cardprice.app.beta`), a separate app with its own data |
+| Beta (phone, OTA) | `./gradlew assembleBeta` | **Card Companion β** (`com.cardprice.app.beta`), a separate app with its own data; optimized (R8, baseline profile), not debuggable |
+| Development | `./gradlew assembleDebug` | the same app id, debuggable and unoptimized (slow scrolling; `run-as` works) |
 
-- Release builds are shrunk (R8) and ARM-only, about 22 MB.
+- Release and beta builds are shrunk (R8) and ARM-only, about 23 MB. Beta builds are signed with this computer's debug key, like debug builds, so either installs over the other and over-the-air updates keep working.
+- `src/main/baseline-prof.txt` (installed by androidx.profileinstaller) pre-compiles the app and Compose code used at startup and while scrolling.
 - Release builds are signed with the building computer's debug key, so copies built on the same computer install over each other and keep people's data. A copy built on another computer can't update one built here.
 - Raise `versionCode` in `app/build.gradle.kts` for every copy you hand out.
-- Unit tests: `./gradlew testDebugUnitTest`.
+- Unit tests: `./gradlew testDebugUnitTest` (the API client, offline queue and import mapping are tested against an in-memory fake server; no network).
+- Install a beta build on a connected phone without losing its data: `adb install -r app/build/outputs/apk/beta/app-beta.apk`.
 
 ## Security
 See [SECURITY.md](SECURITY.md): how data and tokens are stored, HTTPS-only networking, and release signing.

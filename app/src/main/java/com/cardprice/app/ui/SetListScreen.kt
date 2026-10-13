@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
@@ -90,6 +91,7 @@ fun SetListScreen(
     onAddCustomSet: (String, Int) -> Unit,
     onDeleteCustomSet: (String) -> Unit,
     onSelectLanguage: (Language) -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf(FILTER_ALL) }
@@ -100,16 +102,22 @@ fun SetListScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    val groups = buildGroups(state, query, filter)
+    val groups = remember(state, query, filter) { buildGroups(state, query, filter) }
 
     Scaffold(
+        containerColor = com.cardprice.app.ui.theme.Palette.bg,
         topBar = {
             TopAppBar(
-                title = { Text("Pack Calculator", fontWeight = FontWeight.Bold) },
+                title = { Text("Pack Calculator", style = MaterialTheme.typography.titleLarge) },
+                navigationIcon = {
+                    if (onBack != null) IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    containerColor = com.cardprice.app.ui.theme.Palette.surfaceSolid,
+                    titleContentColor = com.cardprice.app.ui.theme.Palette.text,
+                    navigationIconContentColor = com.cardprice.app.ui.theme.Palette.text,
                 ),
             )
         },
@@ -190,7 +198,7 @@ fun SetListScreen(
                             }
                         }
                         if (!isCollapsed) {
-                            items(group.sets, key = { "${group.key}_${it.id}" }) { set ->
+                            items(group.sets, key = { "${group.key}_${it.id}" }, contentType = { "set" }) { set ->
                                 SetRow(
                                     set = set,
                                     isFavorite = set.id in state.favorites,
@@ -432,113 +440,4 @@ private fun AddSetDialog(onDismiss: () -> Unit, onConfirm: (String, Int) -> Unit
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-}
-
-@Composable
-fun SettingsDialog(
-    currentToken: String?,
-    onDismiss: () -> Unit,
-    onSave: (String?) -> Unit,
-    onOpenBackups: (() -> Unit)? = null,
-    /** Opens Cloud backup (backup server sign-in, upload and restore). */
-    onOpenCloud: (() -> Unit)? = null,
-    onSaveRestorePoint: (() -> Unit)? = null,
-    /** e.g. "Learned 12 readings from 15 confirmations (3 corrections)"; null hides the section. */
-    learningSummary: String? = null,
-    onResetLearning: (() -> Unit)? = null,
-) {
-    var confirmReset by rememberSaveable { mutableStateOf(false) }
-    var token by rememberSaveable { mutableStateOf(currentToken.orEmpty()) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Settings") },
-        text = {
-            // Scrolls: with backups, scanner learning and About it's taller than most screens.
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "TCGplayer market prices and sales history work without any setup.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "To also compare PriceCharting prices, paste the API token from your PriceCharting " +
-                        "subscription (pricecharting.com → Subscription → API).",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it.trim() },
-                    label = { Text("PriceCharting API token") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    // A password-type field keeps the keyboard from learning or suggesting the token.
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                )
-                if (onOpenCloud != null) {
-                    HorizontalDivider()
-                    Text("Cloud backup", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Keep a copy of your collection and inventory on a backup server, to restore on this or another phone.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    OutlinedButton(onClick = onOpenCloud) { Text("Cloud backup…") }
-                }
-                if (onOpenBackups != null) {
-                    HorizontalDivider()
-                    Text("Collection backups", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Your collection is backed up automatically (up to once an hour, last 20 kept).",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    OutlinedButton(onClick = onOpenBackups) { Text("Restore a backup…") }
-                    if (onSaveRestorePoint != null) {
-                        OutlinedButton(onClick = onSaveRestorePoint) { Text("Save a restore point…") }
-                    }
-                }
-                if (learningSummary != null) {
-                    HorizontalDivider()
-                    Text("Scanner learning", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "The scanner learns from cards you keep, pick or undo, so repeat readings get faster and surer. $learningSummary",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    if (onResetLearning != null) {
-                        TextButton(onClick = { confirmReset = true }) { Text("Reset what it learned") }
-                    }
-                }
-                HorizontalDivider()
-                val context = LocalContext.current
-                var noLog by remember { mutableStateOf(false) }
-                Text("About", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text("Card Companion ${appVersion(context)}", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "Something not working? Send the debug log (what the scanner read and did, plus any crashes) " +
-                        "to whoever shared the app with you.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                OutlinedButton(onClick = { noLog = !shareDebugLog(context) }) { Text("Send debug log…") }
-                if (noLog) {
-                    Text("Nothing logged yet. Use the scanner first.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(token.ifBlank { null }) }) { Text("Save") } },
-        dismissButton = {
-            Row {
-                if (currentToken != null) {
-                    TextButton(onClick = { onSave(null) }) { Text("Remove") }
-                }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
-        },
-    )
-    if (confirmReset && onResetLearning != null) {
-        AlertDialog(
-            onDismissRequest = { confirmReset = false },
-            title = { Text("Reset scanner learning?") },
-            text = { Text("The scanner forgets confirmed readings, corrections and preferred versions. Your collection isn't affected.") },
-            confirmButton = { TextButton(onClick = { onResetLearning(); confirmReset = false }) { Text("Reset") } },
-            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } },
-        )
-    }
 }

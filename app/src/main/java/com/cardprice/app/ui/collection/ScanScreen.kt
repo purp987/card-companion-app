@@ -43,6 +43,20 @@ import com.cardprice.app.data.scan.MotionDetector
 import androidx.compose.foundation.layout.PaddingValues
 import com.cardprice.app.data.collection.CardPrices
 import com.cardprice.app.ui.formatCurrency
+import com.cardprice.app.ui.usd
+import com.cardprice.app.ui.theme.Palette
+import com.cardprice.app.data.vault.SyncNote
+import com.cardprice.app.data.collection.CollectionCard
+import com.cardprice.app.data.collection.VariantPrice
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.BorderStroke
@@ -117,7 +131,10 @@ import java.util.concurrent.Executors
 @Composable
 fun ScanScreen(
     status: ScanStatus,
-    collection: CollectionState,
+    /** Copies owned of a version in the TCG Vault portfolio scans go to. */
+    counts: (ScanResult, variantKey: String) -> Int,
+    /** What happened on the server for the last change (added / saved offline / problem). */
+    syncNote: SyncNote? = null,
     onCameraText: (List<String>) -> Unit,
     onPhotoText: (List<String>) -> Unit,
     onPhotoError: (String) -> Unit,
@@ -198,7 +215,8 @@ fun ScanScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Scan cards", fontWeight = FontWeight.Bold) },
+                title = { Text("Scan cards", style = MaterialTheme.typography.titleLarge) },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Palette.surfaceSolid),
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
@@ -229,6 +247,7 @@ fun ScanScreen(
                             else -> 1f
                         },
                     )
+                    .clipToBounds()
                     .background(Color.Black)
                     .onGloballyPositioned { if (it.size.height > 0) cameraAspect = it.size.width.toFloat() / it.size.height },
                 contentAlignment = Alignment.Center,
@@ -285,6 +304,7 @@ fun ScanScreen(
                         else -> Modifier.fillMaxWidth().heightIn(max = 360.dp)
                     }
                 )
+                    .background(Palette.bg)
                     .verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -338,7 +358,7 @@ fun ScanScreen(
                             TextButton(onClick = onSkip, contentPadding = PaddingValues(0.dp)) { Text("Not this card") }
                         }
                     }
-                    is ScanStatus.AutoAdded -> AddedBanner(status, collection, prices[status.result.card.id], onUndo, onAddAnother)
+                    is ScanStatus.AutoAdded -> AddedBanner(status, counts, prices[status.result.card.id], onUndo, onAddAnother)
                     ScanStatus.Searching -> StatusText(
                         "Hold a card inside the frame",
                         "Make sure the number at the bottom (like \"PBL EN 111/084\") is sharp and well lit. " +
@@ -355,11 +375,12 @@ fun ScanScreen(
                         else "Still scanning. Try more light, or hold the card flatter.",
                     )
                     is ScanStatus.Failed -> StatusText("Something went wrong", status.message)
-                    is ScanStatus.Found -> FoundCard(status, collection, prices, onChoose, onNext, onSkip, onSetCount)
+                    is ScanStatus.Found -> FoundCard(status, counts, prices, onChoose, onNext, onSkip, onSetCount)
                 }
                 if (status is ScanStatus.NotFound || status is ScanStatus.Failed) {
                     TextButton(onClick = onNext) { Text("Scan again") }
                 }
+                syncNote?.let { SyncLine(it) }
             }
         }
     }
@@ -382,7 +403,7 @@ private fun StatusText(title: String, body: String) {
 @Composable
 private fun FoundCard(
     status: ScanStatus.Found,
-    collection: CollectionState,
+    counts: (ScanResult, String) -> Int,
     prices: Map<String, CardPrices>,
     onChoose: (Int) -> Unit,
     onNext: () -> Unit,
@@ -392,7 +413,7 @@ private fun FoundCard(
     val result = status.results[status.chosen]
     val card = result.card
     var pendingRemoval by remember { mutableStateOf<String?>(null) }
-    fun count(key: String) = collection.count(result.set.language, result.set.setId, card.id, key)
+    fun count(key: String) = counts(result, key)
     // A result can pop up under a finger that was already tapping; ignore taps for a moment so that
     // tap can't add a card by accident.
     val shownAt = remember(result) { System.currentTimeMillis() }
@@ -458,7 +479,7 @@ private fun FoundCard(
                     selected = i == status.chosen,
                     onClick = { onChoose(i) },
                     label = {
-                        Text("${r.setName} #${r.card.number}" + (price?.let { " · ${formatCurrency(it.amount, it.currency)}" } ?: ""))
+                        Text("${r.setName} #${r.card.number}" + (price?.let { " · ${it.display()}" } ?: ""))
                     },
                 )
             }
@@ -667,14 +688,14 @@ private fun SetupPanel(
 @Composable
 private fun AddedBanner(
     added: ScanStatus.AutoAdded,
-    collection: CollectionState,
+    counts: (ScanResult, String) -> Int,
     prices: CardPrices?,
     onUndo: (ScanStatus.AutoAdded) -> Unit,
     onAddAnother: (ScanStatus.AutoAdded) -> Unit,
 ) {
     val r = added.result
     val variant = r.card.variants.firstOrNull { it.key == added.variantKey }?.label.orEmpty()
-    val owned = collection.count(r.set.language, r.set.setId, r.card.id, added.variantKey)
+    val owned = counts(r, added.variantKey)
     Card(
         Modifier.fillMaxWidth(),
         colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -692,7 +713,7 @@ private fun AddedBanner(
                     fontWeight = FontWeight.Bold,
                 )
                 Text("${r.setName} #${r.card.number} · $variant · you have $owned", style = MaterialTheme.typography.bodyMedium)
-                prices?.byVariant?.get(added.variantKey)?.let { PriceLine("${formatCurrency(it.amount, it.currency)} market price") }
+                prices?.byVariant?.get(added.variantKey)?.let { PriceLine("${it.display()} market price") }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Button(onClick = { onAddAnother(added) }) { Text("+1") }
@@ -924,4 +945,68 @@ private fun cardInFrame(frame: Bitmap, rotationDegrees: Int, boxAspect: Float): 
     val crop = Bitmap.createBitmap(upright, left, top, guideW.toInt().coerceAtMost(upright.width - left), guideH.toInt().coerceAtMost(upright.height - top))
     val targetH = 720
     return if (crop.height > targetH) Bitmap.createScaledBitmap(crop, (crop.width * targetH.toFloat() / crop.height).toInt(), targetH, true) else crop
+}
+
+
+/** A price in its own currency; TCG Vault's USD prices follow the currency chosen in Settings. */
+private fun VariantPrice.display(): String = if (currency == "USD") amount.usd() else formatCurrency(amount, currency)
+
+/**
+ * Market price per version for a result: "$1.20" for a single version, "Normal $0.10 · Reverse Holo $0.35"
+ * for several. Null while loading or for numbered placeholders (no price data).
+ */
+internal fun rowPriceText(card: CollectionCard, prices: CardPrices?): String? {
+    if (card.placeholder || prices == null) return null
+    val priced = card.variants.mapNotNull { v -> prices.byVariant[v.key]?.let { v to it } }
+    return when {
+        priced.isEmpty() -> "No recent price"
+        card.variants.size == 1 -> priced.single().second.display()
+        else -> priced.joinToString(" · ") { (v, p) -> "${v.label} ${p.display()}" }
+    }
+}
+
+/** The server outcome of the last change, under the scan result. */
+@Composable
+private fun SyncLine(note: SyncNote) {
+    val color = when (note.kind) {
+        SyncNote.Kind.SAVED -> Palette.up
+        SyncNote.Kind.QUEUED -> Palette.accent3
+        SyncNote.Kind.PROBLEM -> Palette.down
+    }
+    Text(note.text, style = MaterialTheme.typography.bodySmall, color = color)
+}
+
+/** Tap adds a copy; press-and-hold asks to remove every copy of this variant. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun VariantButton(label: String, count: Int, onTap: () -> Unit, onLongPress: () -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    val owned = count > 0
+    val shape = RoundedCornerShape(8.dp)
+    Surface(
+        shape = shape,
+        color = if (owned) Palette.accentSoft else Color.Transparent,
+        contentColor = if (owned) Palette.accent else Palette.text2,
+        border = BorderStroke(1.dp, if (owned) Palette.accent.copy(alpha = 0.5f) else Palette.borderStrong),
+        modifier = Modifier
+            .clip(shape)
+            .combinedClickable(
+                onClickLabel = "Add a copy",
+                onLongClickLabel = "Remove all copies",
+                onLongClick = {
+                    if (owned) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongPress()
+                    }
+                },
+                onClick = onTap,
+            )
+            .semantics { contentDescription = if (owned) "$label, $count owned" else "$label, not owned" },
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (owned) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp).padding(end = 2.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium)
+            if (count > 1) Text("×$count", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
+        }
+    }
 }

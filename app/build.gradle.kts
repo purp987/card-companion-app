@@ -12,6 +12,14 @@ val keystoreProps = rootProject.file("keystore.properties").takeIf { it.exists()
     Properties().apply { f.inputStream().use(::load) }
 }
 
+// The owner's TCG Vault address (Tailscale), kept out of the public repository: set
+// `tcgVault.serverUrl=https://<pc>.<tailnet>.ts.net:8443` in local.properties (git-ignored). Without it the app
+// starts with no server and asks for one in Settings.
+val localProps = rootProject.file("local.properties").takeIf { it.exists() }?.let { f ->
+    Properties().apply { f.inputStream().use(::load) }
+}
+val defaultServerUrl: String = localProps?.getProperty("tcgVault.serverUrl")?.trim().orEmpty()
+
 android {
     namespace = "com.cardprice.app"
     compileSdk = 34
@@ -21,11 +29,12 @@ android {
         minSdk = 26
         targetSdk = 34
         // Raise versionCode for every copy handed out, so phones accept it as an update.
-        versionCode = 3
-        versionName = "1.1"
+        versionCode = 8
+        versionName = "2.2.1"
         // Phones run ARM; leaving out the x86 copies of the text-recognition library halves its size.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         manifestPlaceholders["appLabel"] = "Card Companion"
+        buildConfigField("String", "DEFAULT_SERVER_URL", "\"" + defaultServerUrl + "\"")
     }
 
     signingConfigs {
@@ -48,6 +57,20 @@ android {
             versionNameSuffix = "-beta"
             manifestPlaceholders["appLabel"] = "Card Companion β"
         }
+        // Beta for the phone and over-the-air updates: the same app id and signing key as the debug
+        // build (so it updates in place and OTA keeps working), but optimized like release. Compose is
+        // several times slower in a debuggable, unshrunk build, which made scrolling choppy.
+        create("beta") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".beta"
+            versionNameSuffix = "-beta"
+            manifestPlaceholders["appLabel"] = "Card Companion β"
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
         release {
             // Smaller download: unused code and resources are stripped.
             isMinifyEnabled = true
@@ -67,6 +90,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -81,6 +105,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Installs the bundled baseline profile (src/main/baseline-prof.txt) so startup and scrolling are AOT-compiled.
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     // Picks each set's colours from its artwork for the collection screen.
     implementation("androidx.palette:palette-ktx:1.0.0")
 

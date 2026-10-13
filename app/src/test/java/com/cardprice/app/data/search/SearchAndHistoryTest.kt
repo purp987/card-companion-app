@@ -15,32 +15,6 @@ class SearchAndHistoryTest {
     @get:Rule val tmp = TemporaryFolder()
 
     @Test
-    fun slugsMatchTcgplayerSetUrls() {
-        assertEquals("swsh07-evolving-skies", CardSearch.slug("SWSH07 Evolving Skies"))
-        assertEquals("sm-cosmic-eclipse", CardSearch.slug("SM Cosmic Eclipse"))
-        assertEquals("me-30th-celebration-classic-collection", CardSearch.slug("ME 30th Celebration Classic Collection"))
-        assertEquals("sv-scarlet-and-violet-151", CardSearch.slug("SV Scarlet & Violet 151"))
-    }
-
-    @Test
-    fun parsesResultsAndMapsToCollectionSets() {
-        val json = """{"results":[{"results":[
-            {"productId":684332.0,"productName":"Poke Pad - 081/088","setName":"ME03: Perfect Order","setUrlName":"ME03 Perfect Order","rarityName":"Uncommon","marketPrice":0.31,"customAttributes":{"number":"081/088"}},
-            {"productId":717831.0,"productName":"Code Card - 30th Celebration Booster Pack","setName":"ME: 30th Celebration","setUrlName":"ME 30th Celebration","rarityName":"Code Card","marketPrice":0.06,"customAttributes":{"number":""}},
-            {"productId":1.0,"productName":"Pikachu","setName":"SWSH07: Evolving Skies","setUrlName":"SWSH07 Evolving Skies","rarityName":"Common","marketPrice":null,"customAttributes":{"number":"049/203"}},
-            {"productId":2.0,"productName":"Pikachu","setName":"McDonald's Promos 2016","setUrlName":"McDonalds Promos 2016","rarityName":"Promo","marketPrice":1.0,"customAttributes":{"number":null}}]}]}"""
-        val hits = CardSearch.parse(json, Language.ENGLISH)
-        assertEquals(3, hits.size) // code card dropped
-        assertEquals("Poke Pad", hits[0].name)
-        assertEquals("081", hits[0].number)
-        assertEquals("me03", hits[0].tcgdexSetId)
-        assertEquals("swsh7", hits[1].tcgdexSetId)
-        assertNull(hits[1].marketPrice)
-        assertNull(hits[2].tcgdexSetId) // promos open on TCGplayer
-        assertNull(hits[2].number)
-    }
-
-    @Test
     fun japaneseResultsMapToJapaneseSets() {
         assertEquals("SV2a", TcgSetMap.japanese["sv2a-pokemon-card-151"])
         assertEquals("M6a", TcgSetMap.japanese["m6a-mega-expansion-30th-celebration"])

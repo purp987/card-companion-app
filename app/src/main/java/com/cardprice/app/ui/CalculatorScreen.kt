@@ -70,6 +70,7 @@ import com.cardprice.app.data.market.ProductKind
 import com.cardprice.app.data.CUSTOM_PRESET
 import com.cardprice.app.data.cardsPerPackFor
 import com.cardprice.app.data.presetsFor
+import com.cardprice.app.ui.theme.Palette
 import com.cardprice.app.ui.theme.dealColors
 import com.cardprice.app.ui.theme.seriesColor
 import kotlinx.coroutines.launch
@@ -84,7 +85,10 @@ fun CalculatorScreen(
     onDeletePurchase: (Long) -> Unit,
     market: MarketState,
     onRefreshMarket: () -> Unit,
-    onOpenHistory: (MarketProduct, Int) -> Unit,
+    /** Opens a sealed product's TCG Vault page (price chart with ranges). */
+    onOpenProduct: (MarketProduct) -> Unit,
+    /** Links this set to a different TCG Vault set. */
+    onChooseServerSet: (com.cardprice.app.data.vault.VaultSet) -> Unit,
     /** Opened to check prices (from search): market prices come first, above the calculator. */
     pricesFirst: Boolean = false,
 ) {
@@ -116,8 +120,9 @@ fun CalculatorScreen(
         ?.takeIf { packsPerProduct == presets[presetIndex].packs }
     val comparison = kind?.let { k ->
         MarketComparison(
-            tcgPlayer = market.matched[k]?.marketPrice,
-            priceCharting = ((market.priceCharting as? Load.Ready)?.value?.get(k))?.price,
+            // Market prices are USD; what you paid is in the currency chosen in Settings.
+            tcgPlayer = market.matched[k]?.marketPrice?.let(CurrencyState::fromUsd),
+            priceCharting = ((market.priceCharting as? Load.Ready)?.value?.get(k))?.price?.let(CurrencyState::fromUsd),
         ).takeIf { it.tcgPlayer != null || it.priceCharting != null }
     }
 
@@ -126,6 +131,7 @@ fun CalculatorScreen(
     val focus = LocalFocusManager.current
 
     Scaffold(
+        containerColor = Palette.bg,
         topBar = {
             TopAppBar(
                 title = {
@@ -134,14 +140,14 @@ fun CalculatorScreen(
                             urls = calculatorSetArt(set),
                             label = set.code ?: set.series.shortTitle,
                             color = seriesColor(set.series),
-                            // Light backing so dark logos stay readable on the colored bar.
+                            // Dark showcase backing, like TCG Vault's set tiles.
                             modifier = Modifier.size(width = 64.dp, height = 44.dp)
-                                .background(Color.White.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+                                .background(Palette.showcase, RoundedCornerShape(10.dp))
                                 .padding(3.dp),
                         )
                         Column(Modifier.padding(start = 12.dp)) {
                             Text(set.name, fontWeight = FontWeight.Bold)
-                            Text(set.series.title, style = MaterialTheme.typography.labelMedium)
+                            Text(set.series.title, style = MaterialTheme.typography.labelMedium, color = seriesColor(set.series))
                         }
                     }
                 },
@@ -151,9 +157,9 @@ fun CalculatorScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = seriesColor(set.series),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
+                    containerColor = Palette.surfaceSolid,
+                    titleContentColor = Palette.text,
+                    navigationIconContentColor = Palette.text,
                 ),
             )
         },
@@ -164,7 +170,7 @@ fun CalculatorScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (pricesFirst) item { MarketSection(set, market, onRefreshMarket, onOpenHistory) }
+            if (pricesFirst) item { MarketSection(set, market, onRefreshMarket, onOpenProduct, onChooseServerSet) }
             item {
                 SectionTitle("What did you buy?")
                 FlowRow(
@@ -270,7 +276,7 @@ fun CalculatorScreen(
                 }
             }
 
-            if (!pricesFirst) item { MarketSection(set, market, onRefreshMarket, onOpenHistory) }
+            if (!pricesFirst) item { MarketSection(set, market, onRefreshMarket, onOpenProduct, onChooseServerSet) }
 
             if (purchases.isNotEmpty()) {
                 item { HistorySummary(purchases) }
@@ -419,7 +425,7 @@ private fun PurchaseRow(purchase: Purchase, onDelete: () -> Unit) {
 }
 
 private data class MarketComparison(val tcgPlayer: Double?, val priceCharting: Double?) {
-    /** TCGplayer is preferred since it reflects recent sales; PriceCharting is the fallback. */
+    /** TCG Vault (TCGplayer market) is preferred since it reflects recent sales; PriceCharting is the fallback. */
     val reference: Double? get() = tcgPlayer ?: priceCharting
 }
 
@@ -454,7 +460,7 @@ private fun DealBadge(deal: Deal, color: Color) {
 @Composable
 private fun MarketComparisonText(paidEach: Double, comparison: MarketComparison) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        comparison.tcgPlayer?.let { Text("TCGplayer market: ${it.money()} each") }
+        comparison.tcgPlayer?.let { Text("TCG Vault market: ${it.money()} each") }
         comparison.priceCharting?.let { Text("PriceCharting: ${it.money()} each") }
         val reference = comparison.reference ?: return@Column
         val diff = Deal.percentVsMarket(paidEach, reference)

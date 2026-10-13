@@ -36,14 +36,6 @@ class ExtraSetsTest {
     }
 
     @Test
-    fun japanesePikachuSubsetIs17To46() {
-        val subset = SetSubsets.forSet(Language.JAPANESE, "M6a").single()
-        val cards = TcgPlayerSingles.parse(page).cards
-        assertEquals(listOf("017"), cards.filter(subset::contains).map { it.number })
-        assertEquals(30, subset.numbers.count())
-    }
-
-    @Test
     fun injectedIntoJapaneseMegaSeriesFirst() {
         val series = listOf(CardSeries("M", "MEGA", listOf(CardSet("M6", "Storm Emeralda", 76, 113, null, null))))
         val injected = ExtraSets.inject(Language.JAPANESE, series).single()

@@ -51,45 +51,6 @@ class MarketTest {
     }
 
     @Test
-    fun parsesTcgPlayerSearch() {
-        val json = """{"errors":[],"results":[{"aggregations":{},"results":[
-            {"productId":503313.0,"productName":"151 Elite Trainer Box","setName":"SV: Scarlet & Violet 151","marketPrice":470.95,"lowestPrice":455.0},
-            {"productId":506640.0,"productName":"Promo Thing","setName":"Other","marketPrice":null,"lowestPrice":0}]}]}"""
-        val all = TcgPlayerApi.parseProducts(json)
-        assertEquals(2, all.size)
-        assertEquals(503313L, all[0].id)
-        assertEquals(470.95, all[0].marketPrice!!, 0.001)
-        assertNull(all[1].marketPrice)
-        assertNull(all[1].lowestPrice)
-        assertEquals(listOf("151 Elite Trainer Box"), TcgPlayerApi.parseProducts(json, setNameFilter = "151").map { it.name })
-    }
-
-    @Test
-    fun parsesTcgPlayerHistoryOldestFirst() {
-        val json = """{"count":3,"result":[
-            {"date":"2026-09-24","variants":[{"averageSalesPrice":"462.3","marketPrice":"470.95","quantity":"3","variant":"Normal"}]},
-            {"date":"2026-09-23","variants":[{"averageSalesPrice":"0","marketPrice":"475.23","quantity":"0","variant":"Normal"}]},
-            {"date":"2026-09-22","variants":[]}]}"""
-        val points = TcgPlayerApi.parseHistory(json)
-        assertEquals(listOf(LocalDate.of(2026, 9, 23), LocalDate.of(2026, 9, 24)), points.map { it.date })
-        assertNull(points[0].avgSalePrice)
-        assertEquals(475.23, points[0].marketPrice!!, 0.001)
-        assertEquals(3, points[1].quantitySold)
-        assertEquals(462.3, points[1].avgSalePrice!!, 0.001)
-    }
-
-    @Test
-    fun dropsTodayEntryAlreadyCountedInWeeklyBucket() {
-        fun day(date: String, qty: Int) =
-            """{"date":"$date","variants":[{"averageSalesPrice":"10","marketPrice":"10","quantity":"$qty","variant":"Normal"}]}"""
-        val weekly = """{"result":[${day("2026-09-24", 3)},${day("2026-09-21", 16)},${day("2026-09-14", 24)},${day("2026-09-07", 7)}]}"""
-        assertEquals(listOf(7, 24, 16), TcgPlayerApi.parseHistory(weekly).map { it.quantitySold })
-
-        val daily = """{"result":[${day("2026-09-24", 3)},${day("2026-09-23", 1)},${day("2026-09-22", 2)}]}"""
-        assertEquals(3, TcgPlayerApi.parseHistory(daily).size)
-    }
-
-    @Test
     fun historyStatsWeightByVolume() {
         val d = LocalDate.of(2026, 9, 1)
         val points = listOf(

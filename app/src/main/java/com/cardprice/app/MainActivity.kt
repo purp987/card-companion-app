@@ -1,52 +1,51 @@
 package com.cardprice.app
 
-import android.app.Application
 import android.net.Uri
 import android.os.Bundle
-import com.cardprice.app.data.collection.CardPhotos
-import com.cardprice.app.ui.money
-import com.cardprice.app.ui.display
-import com.cardprice.app.ui.appVersion
-import com.cardprice.app.data.inventory.InventoryStatus
-import com.cardprice.app.data.cloud.LiveStream
-import com.cardprice.app.data.inventory.CollectionLink
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import com.cardprice.app.data.collection.CollectionStore
-import com.cardprice.app.ui.cloud.CloudViewModel
-import com.cardprice.app.ui.cloud.CloudBackupDialog
-import com.cardprice.app.ui.AppIcons
-import com.cardprice.app.ui.inventory.InventoryViewModel
-import com.cardprice.app.ui.inventory.InventoryScreen
-import com.cardprice.app.data.scan.ScanLog
-import com.cardprice.app.data.market.Load
-import com.cardprice.app.ui.collectionSetArt
-import com.cardprice.app.data.collection.CardSeries
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -58,129 +57,94 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.cardprice.app.data.Language
+import com.cardprice.app.data.collection.CardPhotos
+import com.cardprice.app.data.scan.ScanHistoryEntry
+import com.cardprice.app.data.scan.ScanHistoryStore
+import com.cardprice.app.data.scan.ScanLog
+import com.cardprice.app.data.vault.ResolveRequest
+import com.cardprice.app.data.vault.SearchSort
+import com.cardprice.app.data.vault.Vault
+import com.cardprice.app.data.vault.VariantMap
+import com.cardprice.app.ui.AppIcons
+import com.cardprice.app.update.AppUpdater
+import com.cardprice.app.update.UpdateBanner
+import com.cardprice.app.update.UpdateState
 import com.cardprice.app.ui.AppViewModel
 import com.cardprice.app.ui.CalculatorScreen
-import com.cardprice.app.ui.HistoryScreen
-import com.cardprice.app.ui.HistoryViewModel
-import com.cardprice.app.ui.HomeScreen
-import com.cardprice.app.ui.SearchScreen
-import com.cardprice.app.ui.SearchViewModel
+import com.cardprice.app.ui.CurrencyState
 import com.cardprice.app.ui.MarketViewModel
 import com.cardprice.app.ui.SetListScreen
-import com.cardprice.app.ui.collection.CatalogViewModel
-import com.cardprice.app.ui.collection.CollectionHomeScreen
-import com.cardprice.app.ui.collection.CollectionSetScreen
-import com.cardprice.app.ui.collection.CollectionViewModel
+import com.cardprice.app.ui.collection.BinderActions
 import com.cardprice.app.ui.collection.ScanHistoryScreen
 import com.cardprice.app.ui.collection.ScanHistoryViewModel
-import com.cardprice.app.ui.collection.BinderActions
 import com.cardprice.app.ui.collection.ScanScreen
 import com.cardprice.app.ui.collection.ScanViewModel
-import com.cardprice.app.ui.collection.SetCardsViewModel
 import com.cardprice.app.ui.theme.CardPricerTheme
+import com.cardprice.app.ui.theme.Palette
+import com.cardprice.app.ui.vault.ExploreQuery
+import com.cardprice.app.ui.vault.ExploreScreen
+import com.cardprice.app.ui.vault.MoreScreen
+import com.cardprice.app.ui.vault.PortfolioScreen
+import com.cardprice.app.ui.vault.ProductScreen
+import com.cardprice.app.ui.vault.SetDetailScreen
+import com.cardprice.app.ui.vault.SetsScreen
+import com.cardprice.app.ui.vault.SettingsScreen
+import com.cardprice.app.ui.vault.VaultHomeScreen
+import com.cardprice.app.ui.vault.WatchlistsScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
-/** The three sections reachable from the bottom bar. */
+/** Bottom bar: Home · Explore · Scan (center) · Portfolio · More. */
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     HOME("home", "Home", Icons.Filled.Home),
-    CALCULATOR("sets", "Calculator", Icons.Filled.ShoppingCart),
-    COLLECTION("collection", "Collection", Icons.Filled.Star),
-    INVENTORY("inventory", "Inventory", AppIcons.Inventory),
+    EXPLORE("explore", "Explore", Icons.Filled.Search),
+    SCAN("scan", "Scan", AppIcons.Camera),
+    PORTFOLIO("portfolio", "Portfolio", Icons.Filled.Star),
+    MORE("more", "More", Icons.Filled.Menu),
 }
+
+private const val EXPLORE_ROUTE = "explore?q={q}&sort={sort}&type={type}&minPrice={minPrice}&cat={cat}"
 
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels()
-    private val collectionVm: CollectionViewModel by viewModels()
-    private val catalogVm: CatalogViewModel by viewModels()
-    private val inventoryVm: InventoryViewModel by viewModels()
-    private val cloudVm: CloudViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ScanLog.init(filesDir)
         ScanLog.installCrashHandler()
         CardPhotos.init(filesDir)
-        // Beta: resume streaming to the live viewer if it was on.
-        LiveStream.refresh(this)
+        Vault.init(this)
         enableEdgeToEdge()
         setContent {
             CardPricerTheme {
                 val state by viewModel.state.collectAsState()
-                val collection by collectionVm.state.collectAsState()
-                val catalogs by catalogVm.state.collectAsState()
-                // A set's picture, wherever it's shown: what was saved with it, or else worked out from the catalog.
-                fun setArt(language: Language, setId: String): List<String> =
-                    collection.progressFor(language, setId)?.art?.takeIf { it.isNotEmpty() }
-                        ?: catalogArt(catalogs[language], language, setId)
-                // Sets added from the scanner, search or history were saved without a picture; fill those in.
-                val languagesInCollection = collection.progress.map { it.language }.toSet()
-                LaunchedEffect(languagesInCollection) { languagesInCollection.forEach(catalogVm::ensureLoaded) }
-                LaunchedEffect(collection.progress, catalogs) {
-                    collection.progress.filter { it.art.isEmpty() }.forEach { p ->
-                        val art = catalogArt(catalogs[p.language], p.language, p.setId)
-                        if (art.isNotEmpty()) collectionVm.updateSetDetails(p.language, p.setId, value = null, art = art)
-                    }
-                }
+                val currency by Vault.currency.collectAsState()
+                val rates by Vault.rates.collectAsState()
+                LaunchedEffect(currency, rates) { CurrencyState.set(currency, rates[currency]) }
+
                 val nav = rememberNavController()
-                var showCloud by rememberSaveable { mutableStateOf(false) }
-                if (showCloud) {
-                    val cloud by cloudVm.state.collectAsState()
-                    CloudBackupDialog(
-                        state = cloud,
-                        vm = cloudVm,
-                        onRestore = { data ->
-                            collectionVm.restore(CollectionStore.Backup(data.collectionFile, System.currentTimeMillis(), 0, 0))
-                            data.inventory?.let(inventoryVm::replaceAll)
-                        },
-                        onDismiss = { showCloud = false; cloudVm.clearMessage() },
-                    )
-                }
                 val backStack by nav.currentBackStackEntryAsState()
                 val currentRoute = backStack?.destination?.route
-
-                // Beta live viewer: screens, collection changes and totals (does nothing unless streaming is on).
-                val inventoryItems by inventoryVm.items.collectAsState()
-                // Keep inventory's copy of the collection current from the start (not only once Inventory is opened).
-                LaunchedEffect(collection.owned, collection.progress) { inventoryVm.syncCollection(collection.owned, collection.progress) }
-                val screen = describeScreen(currentRoute, backStack?.arguments)
-                LaunchedEffect(screen) { if (screen != null) LiveStream.event("screen", screen) }
-                var lastCopies by remember { mutableStateOf<Int?>(null) }
-                LaunchedEffect(collection.totalCopies) {
-                    val before = lastCopies
-                    if (before != null && before != collection.totalCopies) {
-                        LiveStream.event("action", "Collection ${if (collection.totalCopies > before) "+" else ""}${collection.totalCopies - before} → ${collection.totalCopies} cards")
-                    }
-                    lastCopies = collection.totalCopies
-                }
-                LaunchedEffect(screen, collection, inventoryItems) {
-                    val held = inventoryItems.filter { it.status != InventoryStatus.SOLD }
-                    LiveStream.snapshot(
-                        mapOf(
-                            "screen" to screen,
-                            "cards" to collection.totalCopies,
-                            "sets" to collection.inProgress.size,
-                            "value" to collection.totalValue.display(),
-                            "inventoryUnits" to held.sumOf { it.quantity },
-                            "inventoryValue" to held.sumOf { it.totalMarket ?: 0.0 }.money(),
-                            "scanner" to if (currentRoute == "scan") "Open" else "Closed",
-                            "appVersion" to appVersion(this@MainActivity),
-                        ),
-                    )
+                val scope = rememberCoroutineScope()
+                val tabRoute = if (currentRoute == EXPLORE_ROUTE) "explore" else currentRoute
+                val openProduct: (Long) -> Unit = { id -> nav.navigate("product/$id") }
+                val openSet: (Long) -> Unit = { id -> nav.navigate("set/$id") }
+                val navigate: (String) -> Unit = { route ->
+                    if (route == "portfolio" || route == "more" || route == "home") nav.switchTab(route) else nav.navigate(route)
                 }
 
                 Scaffold(
-                    // Each screen draws its own top bar; this scaffold only adds the bottom bar.
+                    containerColor = Palette.bg,
                     contentWindowInsets = WindowInsets(0),
                     bottomBar = {
-                        if (Tab.entries.any { it.route == currentRoute }) {
-                            NavigationBar {
-                                Tab.entries.forEach { tab ->
-                                    NavigationBarItem(
-                                        selected = currentRoute == tab.route,
-                                        onClick = { nav.switchTab(tab.route) },
-                                        icon = { Icon(tab.icon, contentDescription = null) },
-                                        label = { Text(tab.label) },
-                                    )
+                        Column {
+                            // Non-blocking "update available" banner (not over the scanner).
+                            if (currentRoute != "scan" && currentRoute != "settings") UpdateBanner()
+                            if (tabRoute in Tab.entries.map { it.route } && tabRoute != Tab.SCAN.route) {
+                                VaultBottomBar(tabRoute) { tab ->
+                                    if (tab == Tab.SCAN) nav.navigate("scan") else nav.switchTab(tab.route)
                                 }
                             }
                         }
@@ -192,28 +156,41 @@ class MainActivity : ComponentActivity() {
                         startDestination = Tab.HOME.route,
                         modifier = Modifier.padding(bottom).consumeWindowInsets(bottom),
                     ) {
-                        composable(Tab.HOME.route) {
-                            HomeScreen(
-                                app = state,
-                                collection = collection,
-                                onOpenCalculator = { nav.switchTab(Tab.CALCULATOR.route) },
-                                onOpenCollection = { nav.switchTab(Tab.COLLECTION.route) },
-                                onScan = { nav.navigate("scan") },
-                                onOpenInventory = { nav.switchTab(Tab.INVENTORY.route) },
-                                onSearch = { nav.navigate("search") },
-                                onOpenCollectionSet = { p ->
-                                    nav.navigate(collectionSetRoute(p.language, p.setId, p.setName, p.art))
-                                },
-                                onOpenPurchaseSet = { id -> nav.navigate("calc/${Uri.encode(id)}") },
-                                onSaveToken = viewModel::setPriceChartingToken,
-                                onListBackups = collectionVm::backups,
-                                onRestoreBackup = collectionVm::restore,
-                                onSaveRestorePoint = collectionVm::saveRestorePoint,
-                                onDismissRestoreNotice = collectionVm::dismissRestoreNotice,
-                                onOpenCloud = { showCloud = true },
-                            )
+                        composable(Tab.HOME.route) { VaultHomeScreen(navigate, openProduct, openSet) }
+                        composable(
+                            EXPLORE_ROUTE,
+                            arguments = listOf("q", "sort", "type", "minPrice", "cat").map { k ->
+                                navArgument(k) { type = NavType.StringType; nullable = true; defaultValue = null }
+                            },
+                        ) { entry ->
+                            val a = entry.arguments
+                            val initial = remember(a) {
+                                val q = a?.getString("q")
+                                val sort = a?.getString("sort")
+                                val type = a?.getString("type")
+                                val min = a?.getString("minPrice")?.toDoubleOrNull()
+                                val cat = a?.getString("cat")?.toLongOrNull()
+                                if (q == null && sort == null && type == null && min == null && cat == null) null
+                                else ExploreQuery(q.orEmpty(), SearchSort.of(sort), type, cat, min)
+                            }
+                            // Opened from a "See all" link: show a back arrow.
+                            val back: (() -> Unit)? = if (initial != null) ({ nav.popBackStack() }) else null
+                            ExploreScreen(initial, openProduct, back)
                         }
-                        composable(Tab.CALCULATOR.route) {
+                        composable(Tab.PORTFOLIO.route) { PortfolioScreen(openProduct) }
+                        composable(Tab.MORE.route) { MoreScreen(navigate) }
+                        composable("product/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+                            ProductScreen(entry.arguments!!.getLong("id"), openProduct, openSet) { nav.popBackStack() }
+                        }
+                        composable("set/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+                            SetDetailScreen(entry.arguments!!.getLong("id"), openProduct) { nav.popBackStack() }
+                        }
+                        composable("sets") { SetsScreen(openSet) { nav.popBackStack() } }
+                        composable("watchlists") { WatchlistsScreen(openProduct) { nav.popBackStack() } }
+                        composable("settings") {
+                            SettingsScreen(state.priceChartingToken, viewModel::setPriceChartingToken) { nav.popBackStack() }
+                        }
+                        composable("calc") {
                             SetListScreen(
                                 state = state,
                                 onOpenSet = { id -> nav.navigate("calc/${Uri.encode(id)}") },
@@ -221,77 +198,34 @@ class MainActivity : ComponentActivity() {
                                 onAddCustomSet = viewModel::addCustomSet,
                                 onDeleteCustomSet = viewModel::deleteCustomSet,
                                 onSelectLanguage = viewModel::selectLanguage,
-                            )
-                        }
-                        composable(Tab.INVENTORY.route) {
-                            InventoryScreen(
-                                vm = inventoryVm,
-                                allSets = state.allSets,
-                                collection = collection,
-                                onSoldFromCollection = { item, count ->
-                                    item.collectionKey?.let(CollectionLink::parseKey)?.let { k ->
-                                        collectionVm.removeCopies(k.language, k.setId, k.cardId, k.variantKey, count)
-                                    }
-                                },
-                            )
-                        }
-                        composable(Tab.COLLECTION.route) {
-                            CollectionHomeScreen(
-                                language = state.language,
-                                catalog = catalogs[state.language],
-                                collection = collection,
-                                onSelectLanguage = viewModel::selectLanguage,
-                                onLoadCatalog = catalogVm::ensureLoaded,
-                                onRefreshCatalog = catalogVm::refresh,
-                                onOpenSet = { set, art -> nav.navigate(collectionSetRoute(state.language, set.id, set.name, art)) },
-                                onScan = { nav.navigate("scan") },
-                            )
-                        }
-                        composable(
-                            "collection/{lang}/{setId}?name={name}&art={art}&focus={focus}&focusName={focusName}",
-                            arguments = listOf(
-                                navArgument("lang") { type = NavType.StringType },
-                                navArgument("setId") { type = NavType.StringType },
-                                navArgument("name") { type = NavType.StringType; defaultValue = "" },
-                                navArgument("art") { type = NavType.StringType; defaultValue = "" },
-                                navArgument("focus") { type = NavType.StringType; defaultValue = "" },
-                                navArgument("focusName") { type = NavType.StringType; defaultValue = "" },
-                            ),
-                        ) { entry ->
-                            val args = entry.arguments!!
-                            val language = Language.valueOf(args.getString("lang")!!)
-                            val setId = args.getString("setId")!!
-                            val setName = args.getString("name").orEmpty().ifBlank { setId }
-                            // Art comes from the picker; when opened from Home it's whatever was saved with the set.
-                            val art = args.getString("art").orEmpty().split(ART_SEPARATOR).filter { it.isNotBlank() }
-                                .ifEmpty { setArt(language, setId) }
-                            val app = LocalContext.current.applicationContext as Application
-                            val setVm: SetCardsViewModel = viewModel(factory = viewModelFactory {
-                                initializer { SetCardsViewModel(app, language, setId) }
-                            })
-                            val cardsState by setVm.state.collectAsState()
-                            CollectionSetScreen(
-                                language = language,
-                                setId = setId,
-                                setName = setName,
-                                art = art,
-                                cardsState = cardsState,
-                                collection = collection,
-                                onRefresh = setVm::refresh,
                                 onBack = { nav.popBackStack() },
-                                onSetCount = { cards, cardId, variantKey, count ->
-                                    collectionVm.setCount(language, setId, setName, cards, cardId, variantKey, count)
-                                },
-                                onCardsLoaded = { cards ->
-                                    collectionVm.onSetLoaded(language, setId, setName, cards)
-                                    collectionVm.updateSetDetails(language, setId, value = null, art = art)
-                                },
-                                onEnsurePrices = setVm::ensurePrices,
-                                onRowPrice = setVm::requestPrice,
-                                onValueChanged = { value -> collectionVm.updateSetDetails(language, setId, value, art) },
-                                focusNumber = args.getString("focus").orEmpty().ifBlank { null },
-                                focusName = args.getString("focusName").orEmpty().ifBlank { null },
                             )
+                        }
+                        composable("calc/{setId}") { entry ->
+                            val set = entry.arguments?.getString("setId")?.let(state::setById)
+                            if (set == null) {
+                                // The set was deleted; nothing to show here.
+                                LaunchedEffect(Unit) { nav.popBackStack() }
+                            } else {
+                                val app = application
+                                val marketVm: MarketViewModel = viewModel(
+                                    key = "market-${set.id}",
+                                    factory = viewModelFactory { initializer { MarketViewModel(app, set) } },
+                                )
+                                LaunchedEffect(state.priceChartingToken) { marketVm.setToken(state.priceChartingToken) }
+                                val market by marketVm.state.collectAsState()
+                                CalculatorScreen(
+                                    set = set,
+                                    purchases = state.purchasesFor(set.id),
+                                    onBack = { nav.popBackStack() },
+                                    onSavePurchase = viewModel::addPurchase,
+                                    onDeletePurchase = viewModel::deletePurchase,
+                                    market = market,
+                                    onRefreshMarket = marketVm::refresh,
+                                    onOpenProduct = { p -> openProduct(p.id) },
+                                    onChooseServerSet = marketVm::choose,
+                                )
+                            }
                         }
                         composable("scan") {
                             val scanVm: ScanViewModel = viewModel()
@@ -305,12 +239,17 @@ class MainActivity : ComponentActivity() {
                             val bulkAdded by scanVm.bulkAdded.collectAsState()
                             val manualAdded by scanVm.manualAdded.collectAsState()
                             val scanPrices by scanVm.prices.collectAsState()
-                            scanVm.addCopies = { r, key, delta ->
-                                collectionVm.addCopies(r.set.language, r.set.setId, r.setName, r.setCards, r.card.id, key, delta)
+                            val counts by scanVm.counts.collectAsState()
+                            val syncNote by scanVm.syncNote.collectAsState()
+                            // Quick picks: sets scanned recently (from the scan history), newest first.
+                            val recentSets = remember {
+                                ScanHistoryStore(File(filesDir, "collection")).load()
+                                    .map { Triple(it.language, it.setId, it.setName) }.distinct().take(8)
                             }
                             ScanScreen(
                                 status = status,
-                                collection = collection,
+                                counts = { r, key -> counts["${r.set.language.name}|${r.set.setId}|${r.card.id}|$key"] ?: 0 },
+                                syncNote = syncNote,
                                 onCameraText = scanVm::onCameraText,
                                 onPhotoText = scanVm::onPhotoText,
                                 onPhotoError = scanVm::onPhotoError,
@@ -318,11 +257,7 @@ class MainActivity : ComponentActivity() {
                                 onPhotoBitmap = scanVm::onPhotoBitmap,
                                 onChoose = scanVm::choose,
                                 onNext = scanVm::next,
-                                onSetCount = { r, key, count ->
-                                    val before = collection.count(r.set.language, r.set.setId, r.card.id, key)
-                                    collectionVm.setCount(r.set.language, r.set.setId, r.setName, r.setCards, r.card.id, key, count)
-                                    scanVm.recordManual(r, key, count - before)
-                                },
+                                onSetCount = scanVm::setCount,
                                 autoAdd = autoAdd,
                                 onAutoAddChange = scanVm::setAutoAdd,
                                 onUndo = scanVm::undo,
@@ -333,8 +268,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenHistory = { nav.navigate("scan-history") },
                                 setup = scanSetup,
                                 choosing = choosing,
-                                // Sets being collected, most recent first, as quick picks.
-                                recentSets = collection.inProgress.map { Triple(it.language, it.setId, it.setName) },
+                                recentSets = recentSets,
                                 onStart = scanVm::startScanning,
                                 onChangeSetup = scanVm::changeSetup,
                                 mode = scanMode,
@@ -366,88 +300,60 @@ class MainActivity : ComponentActivity() {
                             LaunchedEffect(Unit) { historyVm.reload() }
                             ScanHistoryScreen(
                                 entries = entries,
-                                onOpen = { e ->
-                                    val art = setArt(e.language, e.setId)
-                                    nav.navigate(collectionSetRoute(e.language, e.setId, e.setName, art, e.number, e.cardName))
-                                },
+                                onOpen = { e -> scope.launch { openScanned(e)?.let(openProduct) } },
                                 onClear = historyVm::clear,
                                 onBack = { nav.popBackStack() },
                             )
                         }
-                        composable("search") {
-                            val searchVm: SearchViewModel = viewModel()
-                            val search by searchVm.state.collectAsState()
-                            SearchScreen(
-                                state = search,
-                                collection = collection,
-                                onQuery = searchVm::setQuery,
-                                onLanguage = searchVm::setLanguage,
-                                onSort = searchVm::setSort,
-                                onOpenInCollection = { hit ->
-                                    val setId = hit.tcgdexSetId!!
-                                    val art = setArt(hit.language, setId)
-                                    // TCGplayer set names carry a code prefix ("ME05: Pitch Black").
-                                    val setName = hit.setName.substringAfter(": ")
-                                    nav.navigate(collectionSetRoute(hit.language, setId, setName, art, hit.number, hit.name))
-                                },
-                                sets = state.allSets,
-                                onOpenSetPrices = { set -> nav.navigate("calc/${Uri.encode(set.id)}?prices=true") },
-                                onOpenSetCards = { set, collectionId ->
-                                    nav.navigate(collectionSetRoute(set.language, collectionId, set.name, setArt(set.language, collectionId)))
-                                },
-                                onBack = { nav.popBackStack() },
-                            )
-                        }
-                        composable(
-                            "calc/{setId}?prices={prices}",
-                            arguments = listOf(navArgument("prices") { type = NavType.BoolType; defaultValue = false }),
-                        ) { entry ->
-                            val set = entry.arguments?.getString("setId")?.let(state::setById)
-                            if (set == null) {
-                                // The set was deleted; nothing to show here.
-                                LaunchedEffect(Unit) { nav.popBackStack() }
-                            } else {
-                                val marketVm: MarketViewModel = viewModel(factory = viewModelFactory {
-                                    initializer { MarketViewModel(set) }
-                                })
-                                LaunchedEffect(state.priceChartingToken) { marketVm.setToken(state.priceChartingToken) }
-                                val market by marketVm.state.collectAsState()
-                                CalculatorScreen(
-                                    set = set,
-                                    purchases = state.purchasesFor(set.id),
-                                    onBack = { nav.popBackStack() },
-                                    onSavePurchase = viewModel::addPurchase,
-                                    onDeletePurchase = viewModel::deletePurchase,
-                                    market = market,
-                                    onRefreshMarket = marketVm::refresh,
-                                    onOpenHistory = { product, cards ->
-                                        val name = Uri.encode(product.name)
-                                        nav.navigate("history/${product.id}?name=$name&cards=$cards")
-                                    },
-                                    pricesFirst = entry.arguments?.getBoolean("prices") == true,
-                                )
-                            }
-                        }
-                        composable(
-                            "history/{productId}?name={name}&cards={cards}",
-                            arguments = listOf(
-                                navArgument("productId") { type = NavType.LongType },
-                                navArgument("name") { type = NavType.StringType; defaultValue = "" },
-                                navArgument("cards") { type = NavType.IntType; defaultValue = 0 },
-                            ),
-                        ) { entry ->
-                            val args = entry.arguments!!
-                            val productId = args.getLong("productId")
-                            val historyVm: HistoryViewModel = viewModel(factory = viewModelFactory {
-                                initializer { HistoryViewModel(productId) }
-                            })
-                            HistoryScreen(
-                                viewModel = historyVm,
-                                productId = productId,
-                                productName = args.getString("name").orEmpty(),
-                                cardsPerProduct = args.getInt("cards"),
-                                onBack = { nav.popBackStack() },
-                            )
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Back from "Install unknown apps" with the permission on: carry on with the update.
+        (AppUpdater.state.value as? UpdateState.NeedsPermission)?.let { if (AppUpdater.canInstall(this)) AppUpdater.update(this, it.release) }
+        AppUpdater.maybeCheck(this)
+    }
+
+    /** A scan-history entry's TCG Vault product, looked up like the scanner does. */
+    private suspend fun openScanned(e: ScanHistoryEntry): Long? {
+        val result = runCatching {
+            withContext(Dispatchers.IO) {
+                Vault.api.resolve(ResolveRequest(VariantMap.langCode(e.language), e.setId, e.setName, e.number, e.cardName, limit = 1))
+            }.firstOrNull()
+        }
+        result.exceptionOrNull()?.let { Toast.makeText(this, it.message ?: "Couldn't reach TCG Vault", Toast.LENGTH_SHORT).show() }
+        val id = result.getOrNull()?.product?.id
+        if (result.isSuccess && id == null) Toast.makeText(this, "TCG Vault has no product for ${e.cardName}", Toast.LENGTH_SHORT).show()
+        return id
+    }
+}
+
+/** TCG Vault-style bottom bar with a raised teal Scan button in the middle. */
+@Composable
+private fun VaultBottomBar(current: String?, onSelect: (Tab) -> Unit) {
+    Column(Modifier.fillMaxWidth().background(Color(0xF20A0F16))) {
+        Box(
+            Modifier.fillMaxWidth().height(1.dp)
+                .background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x662FD4B5), Color(0x668B80F9), Color.Transparent))),
+        )
+        Row(Modifier.fillMaxWidth().navigationBarsPadding().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+            Tab.entries.forEach { tab ->
+                val selected = current == tab.route
+                Box(Modifier.weight(1f).clickable { onSelect(tab) }, contentAlignment = Alignment.Center) {
+                    if (tab == Tab.SCAN) {
+                        Box(
+                            Modifier.offset(y = (-6).dp).size(56.dp).clip(CircleShape).background(Palette.brand)
+                                .border(2.dp, Color(0x332FD4B5), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(tab.icon, contentDescription = tab.label, tint = Palette.onAccent, modifier = Modifier.size(26.dp)) }
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(tab.icon, contentDescription = null, tint = if (selected) Palette.accent else Palette.text3)
+                            Text(tab.label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selected) Palette.accent else Palette.text3)
                         }
                     }
                 }
@@ -461,45 +367,4 @@ private fun NavHostController.switchTab(route: String) = navigate(route) {
     popUpTo(graph.findStartDestination().id) { saveState = true }
     launchSingleTop = true
     restoreState = true
-}
-
-private const val ART_SEPARATOR = "\n"
-
-/** A set's pictures from a loaded catalog, the same ones the collection's set list shows. */
-private fun catalogArt(catalog: Load<List<CardSeries>>?, language: Language, setId: String): List<String> {
-    val series = (catalog as? Load.Ready)?.value ?: return emptyList()
-    for (s in series) {
-        val set = s.sets.firstOrNull { it.id == setId } ?: continue
-        return collectionSetArt(language, set, s.id)
-    }
-    return emptyList()
-}
-
-private fun collectionSetRoute(
-    language: Language,
-    setId: String,
-    name: String,
-    art: List<String>,
-    focusNumber: String? = null,
-    focusName: String? = null,
-): String =
-    "collection/${language.name}/${Uri.encode(setId)}?name=${Uri.encode(name)}&art=${Uri.encode(art.joinToString(ART_SEPARATOR))}" +
-        "&focus=${Uri.encode(focusNumber.orEmpty())}&focusName=${Uri.encode(focusName.orEmpty())}"
-
-/** A readable name for the screen on show, for the live viewer ("Collection · Pitch Black"). */
-private fun describeScreen(route: String?, args: Bundle?): String? {
-    route ?: return null
-    return when {
-        route == "home" -> "Home"
-        route == "sets" -> "Pack Calculator"
-        route == "collection" -> "Collection"
-        route == "inventory" -> "Inventory"
-        route == "scan" -> "Scanner"
-        route == "scan-history" -> "Scan history"
-        route == "search" -> "Search"
-        route.startsWith("collection/") -> "Collection · " + (args?.getString("name")?.ifBlank { null } ?: args?.getString("setId") ?: "set")
-        route.startsWith("calc/") -> "Calculator · " + (args?.getString("setId") ?: "set")
-        route.startsWith("history/") -> "Price history · " + (args?.getString("name") ?: "")
-        else -> route.substringBefore('/')
-    }
 }
