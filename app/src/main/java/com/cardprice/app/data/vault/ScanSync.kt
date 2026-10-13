@@ -53,6 +53,35 @@ class ScanSync(
     private val mutex = Mutex()
     private var holdings: List<Holding>? = null
     private var holdingsPortfolio: Long? = null
+    /** Every version shown so far ("cardKey|variantKey" → target and key), so counts can be recomputed. */
+    private val known = ConcurrentHashMap<String, Pair<ScanTarget, String>>()
+
+    /**
+     * Holdings changed on the server (any source: web UI, the other app, an import, a cleanup): drop the
+     * cached portfolio and recompute every count shown from the server's rows, plus scans still waiting in
+     * the offline queue. Runs under the same lock as adds/undos, so an add in flight is either already on
+     * the server (and counted there) or not started yet; nothing is counted twice or lost.
+     */
+    suspend fun refreshFromServer() {
+        mutex.withLock {
+            holdings = null
+            if (known.isEmpty()) return
+            val rows = runCatching { loadHoldings() }.getOrNull() ?: return
+            val queued = pending.all()
+            val fresh = known.mapNotNull { (slotKey, tk) ->
+                val (target, variantKey) = tk
+                val match = _matches.value[target.key] ?: return@mapNotNull null
+                val variant = VariantMap.pick(match.variants, variantKey)
+                val server = rows.filter { it.productId == match.product.id && (variant == null || it.variantId == variant.id) }.sumOf { it.qty }
+                // Queued with a known product: counted by product. Queued before it was resolved: counted from this session's adds.
+                val waiting = pending.queuedQty(match.product.id, variant?.id) +
+                    added[slotKey].orEmpty().filterIsInstance<Added.Queued>()
+                        .filter { q -> queued.any { it.id == q.pendingId && it.productId == null } }.sumOf { it.qty }
+                slotKey to server + waiting
+            }.toMap()
+            _counts.update { it + fresh }
+        }
+    }
 
     /** Looks the card up on the server (cached for the session). Throws [VaultException] when offline. */
     suspend fun resolve(target: ScanTarget): ResolveMatch? {
@@ -216,6 +245,7 @@ class ScanSync(
 
     /** First time a card's server match is known: start its counts from the portfolio's holdings. */
     private suspend fun seedCounts(target: ScanTarget, match: ResolveMatch, variantKeys: List<String>) {
+        variantKeys.forEach { known[slot(target, it)] = target to it }
         val missing = variantKeys.filter { slot(target, it) !in _counts.value }
         if (missing.isEmpty()) return
         val rows = runCatching { loadHoldings() }.getOrNull() ?: return

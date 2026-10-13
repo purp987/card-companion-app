@@ -269,6 +269,18 @@ internal object VaultJson {
         )
     }
 
+    fun sync(json: String): SyncState {
+        val o = JSONObject(json)
+        return SyncState(
+            holdingsRev = o.lng("holdingsRev") ?: 0,
+            portfoliosRev = o.lng("portfoliosRev") ?: 0,
+            watchlistRev = o.lng("watchlistRev") ?: 0,
+            pricesDay = o.str("pricesDay"),
+            lastSync = o.str("lastSync"),
+            serverTime = o.str("serverTime"),
+        )
+    }
+
     fun createdId(json: String): Long? = JSONObject(json).lng("id")
 
     fun errorMessage(body: String): String? = runCatching { JSONObject(body).str("error") }.getOrNull()

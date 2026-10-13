@@ -63,9 +63,14 @@ class HomeViewModel : ViewModel() {
 
     init {
         refresh(initial = true)
-        viewModelScope.launch { Vault.holdingsVersion.drop(1).collect { refresh() } }
+        // Server-side changes (portfolio movers, watchlist movers, a new price day) reload the rows quietly.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.merge(Vault.holdingsVersion.drop(1), Vault.watchlistVersion.drop(1), Vault.pricesVersion.drop(1))
+                .collect { refresh(initial = true) }
+        }
     }
 
+    /** [initial] = no pull-to-refresh spinner (first load and background updates). */
     fun refresh(initial: Boolean = false) {
         viewModelScope.launch {
             if (!initial) _refreshing.value = true
@@ -218,6 +223,10 @@ class ProductViewModel(application: Application, private val productId: Long) : 
 
     init {
         reload()
+        // Holdings or the star changed on the server (web UI, the other app…): refresh them in place.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.merge(Vault.holdingsVersion.drop(1), Vault.watchlistVersion.drop(1)).collect { refreshHoldings() }
+        }
     }
 
     fun reload() {
@@ -278,6 +287,7 @@ class ProductViewModel(application: Application, private val productId: Long) : 
             } else {
                 val list = if (d.product.isSealed) "Shrink Wrap Watch" else "Chase List"
                 _message.value = if (now) "Added to your $list" else "Removed from your $list"
+                Vault.changedOnServer()
             }
         }
     }
@@ -309,7 +319,10 @@ class ProductViewModel(application: Application, private val productId: Long) : 
 
     private suspend fun refreshHoldings() {
         val d = (_detail.value as? Load.Ready)?.value ?: return
-        (load { Vault.api.product(productId) } as? Load.Ready)?.value?.let { fresh -> _detail.value = Load.Ready(d.copy(holdings = fresh.holdings)) }
+        (load { Vault.api.product(productId) } as? Load.Ready)?.value?.let { fresh ->
+            val current = (_detail.value as? Load.Ready)?.value ?: d
+            _detail.value = Load.Ready(current.copy(holdings = fresh.holdings, watched = fresh.watched))
+        }
     }
 
     fun clearMessage() { _message.value = null }
@@ -331,21 +344,54 @@ class PortfolioViewModel : ViewModel() {
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+    /** When the shown data was loaded (ms), and whether the last reload failed (showing older data). */
+    private val _loadedAt = MutableStateFlow<Long?>(null)
+    val loadedAt: StateFlow<Long?> = _loadedAt.asStateFlow()
+    private val _stale = MutableStateFlow(false)
+    val stale: StateFlow<Boolean> = _stale.asStateFlow()
+    private var reloadJob: Job? = null
+
     init {
         reload()
-        viewModelScope.launch { Vault.holdingsVersion.drop(1).collect { reload(quiet = true) } }
+        // Changes on the server from anywhere (web UI, the other app, imports, a new price day) reload quietly:
+        // no spinner, the list keeps its scroll position.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.merge(Vault.holdingsVersion.drop(1), Vault.portfoliosVersion.drop(1)).collect { reload(quiet = true) }
+        }
+        viewModelScope.launch { Vault.syncOffline.collect { if (it) _stale.value = true } }
+    }
+
+    /** Pull to refresh. */
+    fun refresh() {
+        _refreshing.value = true
+        reload(quiet = true)
     }
 
     fun reload(quiet: Boolean = false) {
-        viewModelScope.launch {
-            (load { Vault.api.portfolios() } as? Load.Ready)?.value?.let { list ->
-                _portfolios.value = list
-                if (_pid.value != null && list.none { it.id == _pid.value }) select(null)
+        reloadJob?.cancel()
+        reloadJob = viewModelScope.launch {
+            val list = load { Vault.api.portfolios() }
+            (list as? Load.Ready)?.value?.let { portfolios ->
+                _portfolios.value = portfolios
+                // The selected portfolio was deleted (here or elsewhere): show all.
+                if (_pid.value != null && portfolios.none { it.id == _pid.value }) {
+                    _pid.value = null
+                    Vault.settings.portfolioId = null
+                }
             }
             if (!quiet) _view.value = Load.Loading
             val v = load { Vault.api.portfolio(_pid.value) }
-            if (v is Load.Ready || !quiet) _view.value = v
-            loadHistory()
+            if (v is Load.Ready || !quiet || _view.value !is Load.Ready) _view.value = v
+            if (v is Load.Ready) {
+                _loadedAt.value = System.currentTimeMillis()
+                _stale.value = false
+            } else {
+                _stale.value = true
+            }
+            loadHistory(quiet)
+            _refreshing.value = false
         }
     }
 
@@ -355,11 +401,12 @@ class PortfolioViewModel : ViewModel() {
         reload()
     }
 
-    fun setRange(r: PriceRange) { _range.value = r; viewModelScope.launch { loadHistory() } }
+    fun setRange(r: PriceRange) { _range.value = r; viewModelScope.launch { loadHistory(quiet = false) } }
 
-    private suspend fun loadHistory() {
-        _history.value = Load.Loading
-        _history.value = load { Vault.api.portfolioHistory(_pid.value, _range.value) }
+    private suspend fun loadHistory(quiet: Boolean) {
+        if (!quiet || _history.value !is Load.Ready) _history.value = Load.Loading
+        val h = load { Vault.api.portfolioHistory(_pid.value, _range.value) }
+        if (h is Load.Ready || !quiet) _history.value = h
     }
 
     fun create(name: String) = viewModelScope.launch {
@@ -367,17 +414,22 @@ class PortfolioViewModel : ViewModel() {
         val err = act { id = Vault.api.createPortfolio(name) }
         _message.value = err
         if (err == null) select(id) else reload()
+        Vault.changedOnServer()
     }
 
     fun rename(id: Long, name: String) = viewModelScope.launch {
         _message.value = act { Vault.api.renamePortfolio(id, name) }
         reload(quiet = true)
+        Vault.changedOnServer()
     }
 
     fun delete(id: Long) = viewModelScope.launch {
         val err = act { Vault.api.deletePortfolio(id) }
         _message.value = err
-        if (err == null) select(null)
+        if (err == null) {
+            select(null)
+            Vault.changedOnServer()
+        }
     }
 
     fun saveHolding(id: Long, input: HoldingInput) = viewModelScope.launch {
@@ -401,15 +453,36 @@ class WatchlistViewModel : ViewModel() {
     private val _items = MutableStateFlow<Load<List<ProductItem>>>(Load.Loading)
     val items: StateFlow<Load<List<ProductItem>>> = _items.asStateFlow()
 
-    init { reload() }
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
-    fun reload() {
-        viewModelScope.launch { _items.value = load { Vault.api.watchlist() } }
+    init {
+        reload()
+        // Stars toggled elsewhere and new prices show up without leaving the screen.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.merge(Vault.watchlistVersion.drop(1), Vault.pricesVersion.drop(1)).collect { reload(quiet = true) }
+        }
+    }
+
+    /** Pull to refresh. */
+    fun refresh() {
+        _refreshing.value = true
+        reload(quiet = true)
+    }
+
+    fun reload(quiet: Boolean = false) {
+        viewModelScope.launch {
+            val r = load { Vault.api.watchlist() }
+            if (r is Load.Ready || !quiet || _items.value !is Load.Ready) _items.value = r
+            _refreshing.value = false
+        }
     }
 
     fun remove(id: Long) {
         val current = (_items.value as? Load.Ready)?.value ?: return
         _items.value = Load.Ready(current.filterNot { it.id == id })
-        viewModelScope.launch { if (act { Vault.api.setWatched(id, false) } != null) reload() }
+        viewModelScope.launch {
+            if (act { Vault.api.setWatched(id, false) } != null) reload() else Vault.changedOnServer()
+        }
     }
 }

@@ -13,13 +13,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import com.cardprice.app.data.market.Load
 
 /** Watchlists, split like the web UI: Chase List (cards) and Shrink Wrap Watch (sealed). */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WatchlistsScreen(onOpenProduct: (Long) -> Unit, onBack: () -> Unit) {
     val vm: WatchlistViewModel = viewModel()
     val items by vm.items.collectAsState()
+    val refreshing by vm.refreshing.collectAsState()
     var sealed by rememberSaveable { mutableStateOf(false) }
     VaultBackground {
         Column(Modifier.fillMaxSize()) {
@@ -31,6 +35,7 @@ fun WatchlistsScreen(onOpenProduct: (Long) -> Unit, onBack: () -> Unit) {
                 is Load.Failed -> GridState(loading = false, error = s.message)
                 is Load.Ready -> GridState(shown, shown.size, loading = false)
             }
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
             ProductGrid(
                 state = grid,
                 onOpen = { onOpenProduct(it.id) },
@@ -48,6 +53,7 @@ fun WatchlistsScreen(onOpenProduct: (Long) -> Unit, onBack: () -> Unit) {
                         Modifier.padding(top = 12.dp),
                     )
                 }
+            }
             }
         }
     }

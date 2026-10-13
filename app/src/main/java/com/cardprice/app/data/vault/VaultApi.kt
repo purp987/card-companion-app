@@ -97,6 +97,9 @@ class VaultApi(
     fun import(portfolio: String, items: List<ImportItem>, dryRun: Boolean): ImportResult =
         VaultJson.importResult(call("POST", "/api/app/import", VaultJson.importBody(portfolio, items, dryRun), requireToken = true))
 
+    /** Change counters for holdings, portfolios and watchlist plus the price day (`GET /api/app/sync`, see [SyncState]). */
+    fun sync(): SyncState = VaultJson.sync(call("GET", "/api/app/sync", requireToken = true))
+
     /** Is there a newer build of this app on the server? (`GET /api/app/update`) */
     fun checkUpdate(appId: String, versionCode: Long): UpdateCheck =
         AppUpdates.parse(call("GET", "/api/app/update" + query("appId" to appId, "versionCode" to versionCode), requireToken = true))

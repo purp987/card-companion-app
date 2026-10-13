@@ -127,9 +127,37 @@ object Vault {
     private val _queue = MutableStateFlow<List<PendingAdd>>(emptyList())
     val queue: StateFlow<List<PendingAdd>> = _queue.asStateFlow()
 
-    /** Bumped whenever holdings change on the server from this app, so portfolio screens reload. */
+    /** Bumped whenever holdings (or their values) change on the server, from any source, so portfolio screens reload. */
     private val _holdingsVersion = MutableStateFlow(0)
     val holdingsVersion: StateFlow<Int> = _holdingsVersion.asStateFlow()
+
+    /** Bumped when portfolios are created, renamed or deleted on the server. */
+    private val _portfoliosVersion = MutableStateFlow(0)
+    val portfoliosVersion: StateFlow<Int> = _portfoliosVersion.asStateFlow()
+
+    /** Bumped when the Chase List / Shrink Wrap Watch changes on the server. */
+    private val _watchlistVersion = MutableStateFlow(0)
+    val watchlistVersion: StateFlow<Int> = _watchlistVersion.asStateFlow()
+
+    /** Bumped when a new daily price set lands (home rows, values and history change). */
+    private val _pricesVersion = MutableStateFlow(0)
+    val pricesVersion: StateFlow<Int> = _pricesVersion.asStateFlow()
+
+    /** When the app last heard from the server (ms), and whether the last try failed (showing older data). */
+    private val _syncedAt = MutableStateFlow<Long?>(null)
+    val syncedAt: StateFlow<Long?> = _syncedAt.asStateFlow()
+    private val _syncOffline = MutableStateFlow(false)
+    val syncOffline: StateFlow<Boolean> = _syncOffline.asStateFlow()
+
+    /** One-off messages for the user (e.g. the scanner's portfolio was deleted elsewhere). */
+    private val _notices = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val notices: kotlinx.coroutines.flow.SharedFlow<String> = _notices
+
+    /** Turns `/api/app/sync` answers into change signals (see [SyncMonitor]). */
+    private lateinit var monitor: SyncMonitor
+    private var syncJob: kotlinx.coroutines.Job? = null
+    private val wake = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val pollLock = Mutex()
 
     private val flushLock = Mutex()
     private var initialized = false
@@ -142,6 +170,7 @@ object Vault {
         api = VaultApi(baseUrl = { settings.baseUrl }, token = { settings.token })
         pending = PendingAdds(FilePendingStore(File(File(app.filesDir, "vault"), "pending-adds.json")))
         pending.observe { _queue.value = it }
+        monitor = SyncMonitor { api.sync() }
         _currency.value = settings.currency
         // Send queued scans as soon as the phone is back online.
         runCatching {
@@ -155,7 +184,95 @@ object Vault {
         refresh()
     }
 
-    fun holdingsChanged() = _holdingsVersion.update { it + 1 }
+    /**
+     * This app changed holdings on the server. With live sync, the next `/api/app/sync` answer carries the new
+     * rev and triggers one quiet reload (so the change isn't loaded twice); without it (older server, or no
+     * baseline yet) screens reload right away.
+     */
+    fun holdingsChanged() {
+        if (syncJob?.isActive == true && !monitor.unsupported && monitor.last != null) syncNow()
+        else _holdingsVersion.update { it + 1 }
+    }
+
+    /** Any other change made here (watchlist star, portfolio rename): just ask the server sooner. */
+    fun changedOnServer() = syncNow()
+
+    // ---- live sync -------------------------------------------------------------------------------
+    // While the app is in the foreground it polls GET /api/app/sync every 20 s (backing off when the
+    // server can't be reached), plus right away on start/resume and after the offline queue is sent.
+
+    /** Start polling (Activity onStart). */
+    fun startSync() {
+        if (syncJob?.isActive == true) {
+            syncNow()
+            return
+        }
+        syncJob = scope.launch {
+            while (true) {
+                pollOnce()
+                kotlinx.coroutines.withTimeoutOrNull(monitor.nextDelayMs()) { wake.receive() }
+            }
+        }
+    }
+
+    /** Stop polling (Activity onStop): nothing runs in the background. */
+    fun stopSync() {
+        syncJob?.cancel()
+        syncJob = null
+    }
+
+    /** Poll now instead of waiting for the next tick. */
+    fun syncNow() {
+        if (syncJob?.isActive == true) wake.trySend(Unit) else scope.launch { pollOnce() }
+    }
+
+    /** Re-reads everything (pull to refresh). */
+    fun reloadAll() {
+        _holdingsVersion.update { it + 1 }
+        _portfoliosVersion.update { it + 1 }
+        _watchlistVersion.update { it + 1 }
+        syncNow()
+    }
+
+    private suspend fun pollOnce() = pollLock.withLock {
+        if (settings.token.isNullOrBlank()) return@withLock
+        when (val r = monitor.poll()) {
+            PollResult.Baseline, PollResult.Unchanged -> markSynced()
+            is PollResult.Changed -> {
+                markSynced()
+                val s = r.signals
+                if (s.portfolios) {
+                    _portfoliosVersion.update { it + 1 }
+                    checkScanPortfolio()
+                }
+                if (s.holdings || s.prices) _holdingsVersion.update { it + 1 }
+                if (s.watchlist) _watchlistVersion.update { it + 1 }
+                if (s.prices) _pricesVersion.update { it + 1 }
+            }
+            is PollResult.Offline -> _syncOffline.value = true
+            PollResult.Unauthorized -> _connection.value = Connection.Unpaired("TCG Vault didn't accept this phone. Pair it again in Settings.")
+            PollResult.Unsupported -> Unit // older server: screens reload after this app's own changes only
+        }
+    }
+
+    private fun markSynced() {
+        _syncedAt.value = monitor.lastOkAt
+        _syncOffline.value = false
+        if (_connection.value is Connection.Offline) refresh()
+    }
+
+    /** The portfolio scans go to was deleted elsewhere: fall back to the first one and say so. */
+    private fun checkScanPortfolio() {
+        val chosen = settings.scanPortfolioId ?: return
+        val list = runCatching { api.portfolios() }.getOrNull() ?: return
+        if (list.none { it.id == chosen }) {
+            settings.scanPortfolioId = null
+            _notices.tryEmit(
+                "The portfolio your scans went to was deleted. Scans now go to " +
+                    (list.firstOrNull()?.name?.let { "\"$it\"" } ?: "your first portfolio") + ".",
+            )
+        }
+    }
 
     fun setCurrency(code: String) {
         settings.currency = code
@@ -193,7 +310,9 @@ object Vault {
     suspend fun pair(code: String): PairResult {
         val result = kotlinx.coroutines.withContext(Dispatchers.IO) { api.pair(code.trim(), settings.deviceName) }
         settings.token = result.token
+        monitor.reset()
         refresh()
+        syncNow()
         return result
     }
 
@@ -211,6 +330,7 @@ object Vault {
         return flushLock.withLock {
             val r = pending.flush(api, ::scanPortfolio) { LocalDate.now().toString() }
             if (r.sent > 0) holdingsChanged()
+            syncNow()
             r
         }
     }

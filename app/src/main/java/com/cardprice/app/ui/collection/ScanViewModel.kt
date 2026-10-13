@@ -40,6 +40,7 @@ import com.cardprice.app.data.vault.VariantMap
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.drop
 import com.cardprice.app.data.scan.ScanLog
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -199,6 +200,8 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Declared after the fields it uses, so it starts once they exist.
         viewModelScope.launch { for (change in changes) change() }
+        // Holdings changed on the server (any source): "you have N" comes from the server again.
+        viewModelScope.launch { Vault.holdingsVersion.drop(1).collect { changes.trySend { sync.refreshFromServer() } } }
     }
 
     fun count(result: ScanResult, variantKey: String): Int = sync.count(target(result), variantKey)

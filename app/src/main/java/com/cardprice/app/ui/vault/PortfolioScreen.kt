@@ -34,6 +34,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -63,6 +65,7 @@ import com.cardprice.app.ui.usdSigned
 
 private enum class HoldingSort(val label: String) { VALUE("Value"), RECENT("Recently added"), NAME("Name"), GAIN("Gain") }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
     val vm: PortfolioViewModel = viewModel()
@@ -72,6 +75,9 @@ fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
     val range by vm.range.collectAsState()
     val history by vm.history.collectAsState()
     val message by vm.message.collectAsState()
+    val refreshing by vm.refreshing.collectAsState()
+    val loadedAt by vm.loadedAt.collectAsState()
+    val stale by vm.stale.collectAsState()
     var tab by rememberSaveable { mutableStateOf("overview") }
     var naming by remember { mutableStateOf<Pair<Long?, String>?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -91,13 +97,23 @@ fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
                 }
             })
             val sortedHoldings = remember(view, sort) { (view as? Load.Ready)?.value?.holdings?.let { sortHoldings(it, sort) }.orEmpty() }
-            LazyColumn(contentPadding = ScreenPadding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                item(key = "picker", contentType = "picker") {
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = ScreenPadding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                item(key = "picker", contentType = "picker") { Column {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         PortfolioPicker(portfolios.map { it.id to "${it.name} (${it.items})" }, pid, vm::select)
                         Segmented(listOf("overview", "holdings"), tab, { if (it == "overview") "Overview" else "Products" }, { tab = it })
                     }
-                }
+                    loadedAt?.let { at ->
+                        val time = remember(at) { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(at)) }
+                        Text(
+                            if (stale) "Offline: showing data from $time" else "Updated $time",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (stale) Palette.accent3 else Palette.text3,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                } }
                 when (val v = view) {
                     Load.Loading -> item { LoadingBox() }
                     is Load.Failed -> item { MessageBox("Couldn't load your portfolio", v.message, "Try again", { vm.reload() }) }
@@ -127,6 +143,7 @@ fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
                         }
                     }
                 }
+            }
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))

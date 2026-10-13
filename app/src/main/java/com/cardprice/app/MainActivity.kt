@@ -123,6 +123,7 @@ class MainActivity : ComponentActivity() {
                 val currency by Vault.currency.collectAsState()
                 val rates by Vault.rates.collectAsState()
                 LaunchedEffect(currency, rates) { CurrencyState.set(currency, rates[currency]) }
+                LaunchedEffect(Unit) { Vault.notices.collect { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() } }
 
                 val nav = rememberNavController()
                 val backStack by nav.currentBackStackEntryAsState()
@@ -311,8 +312,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Keep screens in step with the server while the app is visible (polls /api/app/sync every 20 s).
+        Vault.startSync()
+    }
+
+    override fun onStop() {
+        Vault.stopSync()
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
+        Vault.syncNow()
         // Back from "Install unknown apps" with the permission on: carry on with the update.
         (AppUpdater.state.value as? UpdateState.NeedsPermission)?.let { if (AppUpdater.canInstall(this)) AppUpdater.update(this, it.release) }
         AppUpdater.maybeCheck(this)
