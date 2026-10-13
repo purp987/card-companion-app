@@ -62,6 +62,9 @@ import com.cardprice.app.ui.usd
 import com.cardprice.app.ui.usdSigned
 import java.net.URLEncoder
 
+/** eBay comps and eBay links are switched off for now (owner's request, Oct 2026). Flip to bring them back. */
+private const val EBAY_FEATURES = false
+
 private val CHINESE = setOf(900001L, 900002L)
 
 @Composable
@@ -165,7 +168,8 @@ private fun ProductBody(p: ProductDetail, vm: ProductViewModel, onOpenProduct: (
                             when {
                                 series.isEmpty() && isZh -> ChartNote(
                                     "No daily price chart for Chinese cards",
-                                    "TCGplayer doesn't sell them. This card is valued from recent eBay comps (see Recent eBay Comps below).",
+                                    if (EBAY_FEATURES) "TCGplayer doesn't sell them. This card is valued from recent eBay comps (see Recent eBay Comps below)."
+                                    else "TCGplayer doesn't sell them, so there's no market price for now.",
                                 )
                                 series.isEmpty() -> ChartNote("No market price recorded for this printing yet.", null)
                                 series.size == 1 -> ChartNote(
@@ -229,7 +233,7 @@ private fun ProductBody(p: ProductDetail, vm: ProductViewModel, onOpenProduct: (
             item { AcrossThePond(p) }
         }
         // ---- eBay comps
-        item { EbayComps(p) }
+        if (EBAY_FEATURES) item { EbayComps(p) }
         // ---- shop
         item { ShopLinks(p, isZh, variant?.low) }
         // ---- details
@@ -289,7 +293,7 @@ private fun PriceHero(p: ProductDetail, history: Load<PriceHistory>, market: Dou
                     }
                     series.isEmpty() && isZh -> {
                         val comps = p.ebaySales.count { it.kind == "raw" || it.kind == null }
-                        Text(if (p.product.price != null) "Median of recent eBay comps ($comps raw)" else "No eBay comps yet", style = MaterialTheme.typography.bodySmall, color = Palette.text2)
+                        Text(if (!EBAY_FEATURES) "No market price for Chinese cards" else if (p.product.price != null) "Median of recent eBay comps ($comps raw)" else "No eBay comps yet", style = MaterialTheme.typography.bodySmall, color = Palette.text2)
                     }
                     series.isNotEmpty() -> Text("Tracking since ${series.first().day.dayLabel()}", style = MaterialTheme.typography.bodySmall, color = Palette.text2)
                 }
@@ -397,7 +401,7 @@ private fun JapaneseTwin(p: ProductDetail, onOpenProduct: (Long) -> Unit) {
     GlassCard(Modifier.fillMaxWidth()) {
         CardTitle("Japanese Twin")
         Text(
-            "Chinese cards aren't sold on TCGplayer, so this card is valued from eBay comps. " +
+            (if (EBAY_FEATURES) "Chinese cards aren't sold on TCGplayer, so this card is valued from eBay comps. " else "Chinese cards aren't sold on TCGplayer. ") +
                 if (t != null) "The same card's Japanese edition is a useful reference point:" else "No Japanese edition of this card is in the catalog.",
             style = MaterialTheme.typography.bodyMedium,
             color = Palette.text2,
@@ -507,8 +511,10 @@ private fun ShopLinks(p: ProductDetail, isZh: Boolean, low: Double?) {
     GlassCard(Modifier.fillMaxWidth()) {
         CardTitle("Shop")
         p.url?.let { url -> ShopRow("TCGplayer", "View all listings", low?.usd()) { open(url) } }
-        ShopRow("eBay", "Check out the latest listings", null) { open("https://www.ebay.com/sch/i.html?_nkw=$q") }
-        ShopRow("eBay", "Recently sold prices", null) { open("https://www.ebay.com/sch/i.html?_nkw=$q&LH_Sold=1&LH_Complete=1") }
+        if (EBAY_FEATURES) {
+            ShopRow("eBay", "Check out the latest listings", null) { open("https://www.ebay.com/sch/i.html?_nkw=$q") }
+            ShopRow("eBay", "Recently sold prices", null) { open("https://www.ebay.com/sch/i.html?_nkw=$q&LH_Sold=1&LH_Complete=1") }
+        }
     }
 }
 

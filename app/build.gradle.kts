@@ -29,8 +29,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // Raise versionCode for every copy handed out, so phones accept it as an update.
-        versionCode = 8
-        versionName = "2.2.1"
+        versionCode = 9
+        versionName = "2.2.2"
         // Phones run ARM; leaving out the x86 copies of the text-recognition library halves its size.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         manifestPlaceholders["appLabel"] = "Card Companion"
