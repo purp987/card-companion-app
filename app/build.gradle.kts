@@ -29,12 +29,15 @@ android {
         minSdk = 26
         targetSdk = 34
         // Raise versionCode for every copy handed out, so phones accept it as an update.
-        versionCode = 10
-        versionName = "2.3"
+        versionCode = 15
+        versionName = "2.4.4"
         // Phones run ARM; leaving out the x86 copies of the text-recognition library halves its size.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         manifestPlaceholders["appLabel"] = "Card Companion"
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"" + defaultServerUrl + "\"")
+        // Beta builds send the scanner log to the server for debugging/tuning; release never does.
+        // Overridden to true in the debug and beta build types below.
+        buildConfigField("boolean", "SCAN_LOG_UPLOAD", "false")
     }
 
     signingConfigs {
@@ -56,6 +59,7 @@ android {
             applicationIdSuffix = ".beta"
             versionNameSuffix = "-beta"
             manifestPlaceholders["appLabel"] = "Card Companion β"
+            buildConfigField("boolean", "SCAN_LOG_UPLOAD", "true")
         }
         // Beta for the phone and over-the-air updates: the same app id and signing key as the debug
         // build (so it updates in place and OTA keeps working), but optimized like release. Compose is
@@ -70,6 +74,8 @@ android {
             isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
+            // Beta sends the scanner log to the server (release, inherited via initWith, keeps it false).
+            buildConfigField("boolean", "SCAN_LOG_UPLOAD", "true")
         }
         release {
             // Smaller download: unused code and resources are stripped.

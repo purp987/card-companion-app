@@ -97,6 +97,11 @@ class VaultApi(
     fun import(portfolio: String, items: List<ImportItem>, dryRun: Boolean): ImportResult =
         VaultJson.importResult(call("POST", "/api/app/import", VaultJson.importBody(portfolio, items, dryRun), requireToken = true))
 
+    /** Uploads a batch of scanner-log events (beta only; see server/scanLog.js). Body built by ScanLogUploader. */
+    fun scanLog(body: String) {
+        call("POST", "/api/app/scan-log", body, requireToken = true)
+    }
+
     /** Change counters for holdings, portfolios and watchlist plus the price day (`GET /api/app/sync`, see [SyncState]). */
     fun sync(): SyncState = VaultJson.sync(call("GET", "/api/app/sync", requireToken = true))
 

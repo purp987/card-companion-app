@@ -233,7 +233,6 @@ class MainActivity : ComponentActivity() {
                             val status by scanVm.status.collectAsState()
                             val autoAdd by scanVm.autoAdd.collectAsState()
                             val scanSetup by scanVm.setup.collectAsState()
-                            val choosing by scanVm.choosing.collectAsState()
                             val scanMode by scanVm.mode.collectAsState()
                             val binderLayout by scanVm.layout.collectAsState()
                             val bulk by scanVm.bulk.collectAsState()
@@ -242,6 +241,7 @@ class MainActivity : ComponentActivity() {
                             val scanPrices by scanVm.prices.collectAsState()
                             val counts by scanVm.counts.collectAsState()
                             val syncNote by scanVm.syncNote.collectAsState()
+                            val scanSession by scanVm.session.collectAsState()
                             // Quick picks: sets scanned recently (from the scan history), newest first.
                             val recentSets = remember {
                                 ScanHistoryStore(File(filesDir, "collection")).load()
@@ -250,6 +250,7 @@ class MainActivity : ComponentActivity() {
                             ScanScreen(
                                 status = status,
                                 counts = { r, key -> counts["${r.set.language.name}|${r.set.setId}|${r.card.id}|$key"] ?: 0 },
+                                session = scanSession,
                                 syncNote = syncNote,
                                 onCameraText = scanVm::onCameraText,
                                 onPhotoText = scanVm::onPhotoText,
@@ -268,10 +269,8 @@ class MainActivity : ComponentActivity() {
                                 onAddAnother = scanVm::addAnother,
                                 onOpenHistory = { nav.navigate("scan-history") },
                                 setup = scanSetup,
-                                choosing = choosing,
                                 recentSets = recentSets,
-                                onStart = scanVm::startScanning,
-                                onChangeSetup = scanVm::changeSetup,
+                                onApplySetup = scanVm::startScanning,
                                 mode = scanMode,
                                 layout = binderLayout,
                                 bulk = bulk,

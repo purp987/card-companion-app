@@ -55,6 +55,17 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Surface
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.mutableIntStateOf
@@ -62,6 +73,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -107,6 +119,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -133,6 +146,8 @@ fun ScanScreen(
     status: ScanStatus,
     /** Copies owned of a version in the TCG Vault portfolio scans go to. */
     counts: (ScanResult, variantKey: String) -> Int,
+    /** Net copies and value added since the scanner opened, shown as a running tally. */
+    session: SessionStats = SessionStats(),
     /** What happened on the server for the last change (added / saved offline / problem). */
     syncNote: SyncNote? = null,
     onCameraText: (List<String>) -> Unit,
@@ -157,11 +172,10 @@ fun ScanScreen(
     onAddAnother: (ScanStatus.AutoAdded) -> Unit,
     onOpenHistory: () -> Unit,
     setup: ScanSetup,
-    choosing: Boolean,
-    /** Sets offered as quick picks in the setup panel: (language, set id, set name). */
+    /** Sets offered as quick picks in the toolbar: (language, set id, set name). */
     recentSets: List<Triple<Language, String, String>>,
-    onStart: (ScanSetup) -> Unit,
-    onChangeSetup: () -> Unit,
+    /** Apply changed scan settings on the fly (restarts reading with them). */
+    onApplySetup: (ScanSetup) -> Unit,
     mode: ScanMode,
     layout: BinderLayout,
     bulk: BulkState?,
@@ -212,190 +226,313 @@ fun ScanScreen(
         onDispose { }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Scan cards", style = MaterialTheme.typography.titleLarge) },
-                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Palette.surfaceSolid),
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-                actions = {
-                    // Kept in the top bar so they never move when a result appears below.
-                    TextButton(onClick = {
-                        pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }) { Text("Photo") }
-                    if (hasCamera) {
-                        TextButton(onClick = { torch = !torch }) { Text(if (torch) "Light ✓" else "Light") }
-                    }
-                    TextButton(onClick = onOpenHistory) { Text("History") }
-                },
-            )
-        },
-    ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            // Camera area: live preview with a card-shaped guide.
+    // Full-bleed camera with floating controls over it, like a dedicated scanner: the live view fills the
+    // screen, a translucent bar floats on top, and results/setup slide up from the bottom as a sheet.
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        val sheetMax = maxHeight * 0.78f
+
+        if (hasCamera) {
             Box(
-                // While choosing what to scan, the camera shrinks so the whole setup fits without scrolling.
-                Modifier.fillMaxWidth()
-                    // Reviewing a binder page needs the room; the camera isn't used then.
-                    .weight(
-                        when {
-                            choosing -> 0.3f
-                            mode == ScanMode.BINDER && (bulk != null || bulkAdded != null) -> 0.2f
-                            mode == ScanMode.BINDER -> 0.45f
-                            else -> 1f
-                        },
-                    )
-                    .clipToBounds()
-                    .background(Color.Black)
+                Modifier.fillMaxSize().clipToBounds()
                     .onGloballyPositioned { if (it.size.height > 0) cameraAspect = it.size.width.toFloat() / it.size.height },
                 contentAlignment = Alignment.Center,
             ) {
-                if (hasCamera) {
-                    CameraPreview(
-                        torch = torch,
-                        onCaptureReady = { imageCapture = it },
-                        onMotion = { if (!choosing) onMotion() },
-                        onCameraEvent = onCameraEvent,
-                        onCardFrame = onCardFrame,
-                        boxAspect = { cameraAspect },
-                        // Frames keep being read while a suggestion is up, so reading another card replaces it.
-                        // The view model decides what to do with each reading (including while a lookup runs).
-                        onText = { if (!choosing) onCameraText(it) },
-                    )
-                    if (mode == ScanMode.BINDER && !choosing) {
-                        PageGuide(layout)
-                    } else {
-                        Box(
-                            Modifier.fillMaxHeight(0.86f).aspectRatio(63f / 88f)
-                                .border(BorderStroke(3.dp, Color.White.copy(alpha = 0.85f)), RoundedCornerShape(14.dp)),
-                        )
-                    }
-                    ConfirmedSplash(splashFor(status as? ScanStatus.AutoAdded, bulkAdded, manualAdded))
-                } else {
-                    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            "Camera access is needed to scan cards. You can still pick a photo of a card.",
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                        )
-                        OutlinedButton(
-                            onClick = {
-                                if (asked) {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
-                                    )
-                                } else permission.launch(Manifest.permission.CAMERA)
-                            },
-                            modifier = Modifier.padding(top = 12.dp),
-                        ) { Text(if (asked) "Open app settings" else "Allow camera", color = Color.White) }
-                    }
-                }
+                CameraPreview(
+                    torch = torch,
+                    onCaptureReady = { imageCapture = it },
+                    onMotion = onMotion,
+                    onCameraEvent = onCameraEvent,
+                    onCardFrame = onCardFrame,
+                    boxAspect = { cameraAspect },
+                    // Frames keep being read while a suggestion is up, so reading another card replaces it.
+                    // The view model decides what to do with each reading (binder mode and pauses included).
+                    onText = onCameraText,
+                )
+                if (mode == ScanMode.BINDER) PageGuide(layout) else CardGuide()
             }
-
-            // Result / status panel.
+        } else {
             Column(
-                (
-                    when {
-                        choosing -> Modifier.fillMaxWidth().weight(0.7f)
-                        mode == ScanMode.BINDER && (bulk != null || bulkAdded != null) -> Modifier.fillMaxWidth().weight(0.8f)
-                        mode == ScanMode.BINDER -> Modifier.fillMaxWidth().weight(0.55f)
-                        else -> Modifier.fillMaxWidth().heightIn(max = 360.dp)
-                    }
-                )
-                    .background(Palette.bg)
-                    .verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                Modifier.fillMaxSize().padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (choosing) {
-                    SetupPanel(setup, recentSets, onStart)
-                    return@Column
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Scanning", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(setup.summary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    }
-                    TextButton(onClick = onChangeSetup) { Text("Change") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = mode == ScanMode.SINGLE, onClick = { binder.onMode(ScanMode.SINGLE) }, label = { Text("Single card") })
-                    FilterChip(selected = mode == ScanMode.BINDER, onClick = { binder.onMode(ScanMode.BINDER) }, label = { Text("Binder page") })
-                }
-                if (mode == ScanMode.BINDER) {
-                    BinderPanel(layout, bulk, bulkAdded, capturing, binder) {
-                        val capture = imageCapture ?: return@BinderPanel
-                        capturing = true
-                        scope.launch {
-                            val picture = runCatching { capture.captureBitmap(context) }.getOrNull()
-                            capturing = false
-                            if (picture == null) onPhotoError("Couldn't take a picture. Try again.")
-                            else readBinderPage(cropToGuide(picture, cameraAspect, layout))
-                        }
-                    }
-                    return@Column
-                }
-                FilterChip(
-                    selected = autoAdd,
-                    onClick = { onAutoAddChange(!autoAdd) },
-                    label = { Text(if (autoAdd) "Auto-add sure matches: on" else "Auto-add sure matches: off") },
+                Text(
+                    "Camera access is needed to scan cards. You can still pick a photo of a card.",
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
                 )
-                when (status) {
-                    is ScanStatus.HoldSteady -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        AsyncImage(
-                            model = status.result.card.imageUrl("low"),
-                            contentDescription = null,
-                            modifier = Modifier.width(44.dp).aspectRatio(0.716f),
-                        )
-                        Column(Modifier.padding(start = 12.dp)) {
-                            Text("Hold steady…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(
-                                "Checking ${status.result.card.name} (${status.result.setName} #${status.result.card.number}) once more before adding it.",
-                                style = MaterialTheme.typography.bodyMedium,
+                OutlinedButton(
+                    onClick = {
+                        if (asked) {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
                             )
-                            rowPriceText(status.result.card, prices[status.result.card.id])?.let { PriceLine(it) }
-                            TextButton(onClick = onSkip, contentPadding = PaddingValues(0.dp)) { Text("Not this card") }
+                        } else permission.launch(Manifest.permission.CAMERA)
+                    },
+                    modifier = Modifier.padding(top = 12.dp),
+                ) { Text(if (asked) "Open app settings" else "Allow camera", color = Color.White) }
+            }
+        }
+
+        // Floating top bar: back, what's being scanned, torch and an overflow menu.
+        Column(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
+                .statusBarsPadding(),
+        ) {
+            ScannerTopBar(
+                summary = setup.summary,
+                hasCamera = hasCamera,
+                torch = torch,
+                mode = mode,
+                autoAdd = autoAdd,
+                onAutoAddChange = onAutoAddChange,
+                onTorch = { torch = !torch },
+                onMode = binder.onMode,
+                onBack = onBack,
+                onPhoto = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onHistory = onOpenHistory,
+            )
+            if (session.cards > 0) {
+                Box(Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) { SessionSummary(session) }
+            }
+        }
+
+        ConfirmedSplash(splashFor(status as? ScanStatus.AutoAdded, bulkAdded, manualAdded))
+
+        // Bottom: the scan result sheet (when there's something to show), then the settings toolbar.
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            val showSheet = mode == ScanMode.BINDER || status !is ScanStatus.Searching
+            if (showSheet) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = sheetMax),
+                    shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+                    color = Palette.surfaceSolid,
+                    border = BorderStroke(1.dp, Palette.border),
+                ) {
+                    Column(
+                        Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        SheetGrip()
+                        if (mode == ScanMode.BINDER) {
+                            BinderPanel(layout, bulk, bulkAdded, capturing, binder) {
+                                val capture = imageCapture ?: return@BinderPanel
+                                capturing = true
+                                scope.launch {
+                                    val picture = runCatching { capture.captureBitmap(context) }.getOrNull()
+                                    capturing = false
+                                    if (picture == null) onPhotoError("Couldn't take a picture. Try again.")
+                                    else readBinderPage(cropToGuide(picture, cameraAspect, layout))
+                                }
+                            }
+                        } else {
+                            when (status) {
+                                is ScanStatus.HoldSteady -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AsyncImage(
+                                        model = status.result.card.imageUrl("low"),
+                                        contentDescription = null,
+                                        modifier = Modifier.width(44.dp).aspectRatio(0.716f),
+                                    )
+                                    Column(Modifier.padding(start = 12.dp)) {
+                                        Text("Hold steady…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            "Checking ${status.result.card.name} (${status.result.setName} #${status.result.card.number}) once more before adding it.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        rowPriceText(status.result.card, prices[status.result.card.id])?.let { PriceLine(it) }
+                                        TextButton(onClick = onSkip, contentPadding = PaddingValues(0.dp)) { Text("Not this card") }
+                                    }
+                                }
+                                is ScanStatus.AutoAdded -> AddedBanner(status, counts, prices[status.result.card.id], onUndo, onAddAnother)
+                                ScanStatus.Searching -> Unit // handled by the slim hint below
+                                is ScanStatus.LookingUp -> Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(Modifier.width(24.dp).height(24.dp))
+                                    Text("Read ${status.summary}, looking it up…", modifier = Modifier.padding(start = 12.dp))
+                                }
+                                is ScanStatus.NotFound -> StatusText(
+                                    if (status.fromPhoto && status.summary == "no card number") "Couldn't read a card number in that photo"
+                                    else "No card found for ${status.summary}",
+                                    if (status.fromPhoto) "Try a sharper photo that shows the bottom of the card."
+                                    else "Still scanning. Try more light, or hold the card flatter.",
+                                )
+                                is ScanStatus.Failed -> StatusText("Something went wrong", status.message)
+                                is ScanStatus.Found -> FoundCard(status, counts, prices, onChoose, onNext, onSkip, onSetCount)
+                            }
+                            if (status is ScanStatus.NotFound || status is ScanStatus.Failed) {
+                                TextButton(onClick = onNext) { Text("Scan again") }
+                            }
+                            syncNote?.let { SyncLine(it) }
                         }
                     }
-                    is ScanStatus.AutoAdded -> AddedBanner(status, counts, prices[status.result.card.id], onUndo, onAddAnother)
-                    ScanStatus.Searching -> StatusText(
-                        "Hold a card inside the frame",
-                        "Make sure the number at the bottom (like \"PBL EN 111/084\") is sharp and well lit. " +
-                            "Or tap Photo to scan a picture.",
-                    )
-                    is ScanStatus.LookingUp -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.width(24.dp).height(24.dp))
-                        Text("Read ${status.summary}, looking it up…", modifier = Modifier.padding(start = 12.dp))
-                    }
-                    is ScanStatus.NotFound -> StatusText(
-                        if (status.fromPhoto && status.summary == "no card number") "Couldn't read a card number in that photo"
-                        else "No card found for ${status.summary}",
-                        if (status.fromPhoto) "Try a sharper photo that shows the bottom of the card."
-                        else "Still scanning. Try more light, or hold the card flatter.",
-                    )
-                    is ScanStatus.Failed -> StatusText("Something went wrong", status.message)
-                    is ScanStatus.Found -> FoundCard(status, counts, prices, onChoose, onNext, onSkip, onSetCount)
                 }
-                if (status is ScanStatus.NotFound || status is ScanStatus.Failed) {
-                    TextButton(onClick = onNext) { Text("Scan again") }
-                }
-                syncNote?.let { SyncLine(it) }
+            } else {
+                // Searching: just a slim hint floating above the toolbar, so the camera stays dominant.
+                Text(
+                    "Point at a card — keep its number sharp and lit",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+                )
+            }
+            ScanToolbar(setup, recentSets, onApplySetup)
+        }
+    }
+}
+
+/** A short handle at the top of the bottom sheet, so it reads as a sheet. */
+@Composable
+private fun SheetGrip() {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Palette.borderStrong))
+    }
+}
+
+/** Floating controls over the camera: back, the current setup, torch, and an overflow menu. */
+@Composable
+private fun ScannerTopBar(
+    summary: String,
+    hasCamera: Boolean,
+    torch: Boolean,
+    mode: ScanMode,
+    autoAdd: Boolean,
+    onAutoAddChange: (Boolean) -> Unit,
+    onTorch: () -> Unit,
+    onMode: (ScanMode) -> Unit,
+    onBack: () -> Unit,
+    onPhoto: () -> Unit,
+    onHistory: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White) }
+        Text(
+            summary,
+            style = MaterialTheme.typography.titleSmall,
+            color = Color.White,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+        )
+        if (hasCamera) TorchPill(torch, onTorch)
+        Box {
+            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.Menu, contentDescription = "More", tint = Color.White) }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Pick a photo") }, onClick = { menu = false; onPhoto() })
+                DropdownMenuItem(text = { Text("Scan history") }, onClick = { menu = false; onHistory() })
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Auto-add sure matches") },
+                    onClick = { onAutoAddChange(!autoAdd) },
+                    trailingIcon = { if (autoAdd) Icon(Icons.Filled.Check, contentDescription = null, tint = Palette.accent) },
+                )
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Single card") },
+                    onClick = { menu = false; onMode(ScanMode.SINGLE) },
+                    trailingIcon = { if (mode == ScanMode.SINGLE) Icon(Icons.Filled.Check, contentDescription = null, tint = Palette.accent) },
+                )
+                DropdownMenuItem(
+                    text = { Text("Binder page") },
+                    onClick = { menu = false; onMode(ScanMode.BINDER) },
+                    trailingIcon = { if (mode == ScanMode.BINDER) Icon(Icons.Filled.Check, contentDescription = null, tint = Palette.accent) },
+                )
             }
         }
     }
 }
+
+/** A small pill toggle for the camera light. */
+@Composable
+private fun TorchPill(on: Boolean, onToggle: () -> Unit) {
+    Surface(
+        onClick = onToggle,
+        shape = RoundedCornerShape(999.dp),
+        color = if (on) Palette.accent else Color.Black.copy(alpha = 0.35f),
+        contentColor = if (on) Palette.onAccent else Color.White,
+        border = BorderStroke(1.dp, if (on) Palette.accent else Color.White.copy(alpha = 0.4f)),
+    ) {
+        Text(
+            if (on) "Light on" else "Light",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+        )
+    }
+}
+
 
 @Composable
 private fun PriceLine(text: String) {
     Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)
 }
 
+/** The card-shaped aiming frame over the camera: a faint full outline with accent corner brackets. */
+@Composable
+private fun CardGuide() {
+    Box(
+        Modifier.fillMaxHeight(0.58f).aspectRatio(63f / 88f).offset(y = (-48).dp).drawBehind {
+            val r = 16.dp.toPx()
+            val arm = size.minDimension * 0.16f
+            val w = 3.dp.toPx()
+            // Faint full outline so the whole card target reads at a glance.
+            drawRoundRect(
+                color = Color.White.copy(alpha = 0.35f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()),
+            )
+            // Accent L-brackets at each corner.
+            val a = Palette.accent
+            fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+                drawLine(a, androidx.compose.ui.geometry.Offset(x, y), androidx.compose.ui.geometry.Offset(x + dx, y), w, StrokeCap.Round)
+                drawLine(a, androidx.compose.ui.geometry.Offset(x, y), androidx.compose.ui.geometry.Offset(x, y + dy), w, StrokeCap.Round)
+            }
+            corner(r * 0.4f, r * 0.4f, arm, arm)
+            corner(size.width - r * 0.4f, r * 0.4f, -arm, arm)
+            corner(r * 0.4f, size.height - r * 0.4f, arm, -arm)
+            corner(size.width - r * 0.4f, size.height - r * 0.4f, -arm, -arm)
+        },
+    )
+}
+
+/** A running tally of what this scanning session has added, so bulk scanning feels like progress. */
+@Composable
+private fun SessionSummary(session: SessionStats) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = Palette.accentSoft,
+        border = BorderStroke(1.dp, Palette.accent.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(18.dp))
+                Text(
+                    "  ${session.cards} ${if (session.cards == 1) "card" else "cards"} this session",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Palette.text,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (session.value > 0) Text(session.value.usd(), style = MaterialTheme.typography.labelLarge, color = Palette.accent, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
 @Composable
 private fun StatusText(title: String, body: String) {
     Column {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(body, style = MaterialTheme.typography.bodyMedium, color = Palette.text2)
     }
 }
 
@@ -428,7 +565,7 @@ private fun FoundCard(
     }
     Column {
         Text(heading, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(detail, style = MaterialTheme.typography.bodyMedium, color = Palette.text2)
     }
 
     Card(Modifier.fillMaxWidth()) {
@@ -445,12 +582,12 @@ private fun FoundCard(
                 Text(
                     listOfNotNull(result.set.language.label, card.rarity).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Palette.text2,
                 )
                 Text(
                     "Tap to add a copy · hold to remove",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Palette.text2,
                     modifier = Modifier.padding(top = 6.dp),
                 )
                 FlowRow(
@@ -495,7 +632,7 @@ private fun FoundCard(
         Text(
             "Wrong card? Tap \"Not this card\", or give the card a shake to read it again.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Palette.text2,
         )
     }
 
@@ -613,74 +750,121 @@ private fun ConfirmedSplash(info: SplashInfo?) {
     }
 }
 
-/** "What are you scanning?": finish, language and set, chosen before the camera starts reading. */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * The settings toolbar pinned to the bottom of the scanner: Finish, Set and Language, so what's being
+ * scanned can be changed on the fly without a separate setup step. The whole bar is one wide hump that
+ * reaches both edges, filled solid with the teal selector colour; the three buttons sit flat on it,
+ * divided by hairlines, with the centre (Set) emphasised. Any change applies immediately via [onApply].
+ */
 @Composable
-private fun SetupPanel(
-    initial: ScanSetup,
+private fun ScanToolbar(
+    setup: ScanSetup,
     recentSets: List<Triple<Language, String, String>>,
-    onStart: (ScanSetup) -> Unit,
+    onApply: (ScanSetup) -> Unit,
 ) {
-    var finish by remember { mutableStateOf(initial.finish) }
-    var language by remember { mutableStateOf(initial.language) }
-    var set by remember { mutableStateOf(initial.setId?.let { id -> initial.setName?.let { id to it } }) }
+    val humpDp = 18.dp
+    val humpPx = with(LocalDensity.current) { humpDp.toPx() }
+    val shape = remember(humpPx) { humpShape(humpPx) }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("What are you scanning?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    val finishOptions = ScanFinish.entries.map { it to it.label }
+    val languages = listOf<Language?>(null, Language.ENGLISH, Language.JAPANESE, Language.CHINESE_SIMPLIFIED)
+    val languageOptions = languages.map { it to (it?.chipLabel ?: "Any") }
+    val set = setup.setId?.let { id -> setup.setName?.let { id to it } }
+    val setOptions: List<Pair<Pair<String, String>?, String>> =
+        listOf<Pair<Pair<String, String>?, String>>(null to "Any set") +
+            recentSets.filter { setup.language == null || it.first == setup.language }.take(12).map { (_, id, name) -> (id to name) to name }
 
-        Text("Finish", style = MaterialTheme.typography.labelLarge)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ScanFinish.entries.forEach { f ->
-                FilterChip(selected = finish == f, onClick = { finish = f }, label = { Text(f.label) })
+    // The hump is filled completely with the selector teal (accent over the solid surface), edge to edge.
+    Box(
+        Modifier.fillMaxWidth()
+            .clip(shape)
+            .background(Palette.surfaceSolid)
+            .background(Palette.accentGlow)
+            .border(1.dp, Palette.accent.copy(alpha = 0.6f), shape),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 6.dp, end = 6.dp, top = humpDp + 8.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            ToolbarButton("Finish", setup.finish.label, finishOptions, setup.finish, Modifier.weight(1f)) {
+                onApply(setup.copy(finish = it))
+            }
+            ToolbarDivider()
+            ToolbarButton("Set", set?.second ?: "Any set", setOptions, set, Modifier.weight(1.25f).offset(y = -8.dp), center = true) { picked ->
+                val lang = if (picked != null) recentSets.firstOrNull { it.second == picked.first }?.first ?: setup.language else setup.language
+                onApply(setup.copy(setId = picked?.first, setName = picked?.second, language = lang))
+            }
+            ToolbarDivider()
+            ToolbarButton("Language", setup.language?.chipLabel ?: "Any", languageOptions, setup.language, Modifier.weight(1f)) { l ->
+                val keepSet = set != null && (l == null || recentSets.any { it.first == l && it.second == set.first })
+                onApply(setup.copy(language = l, setId = if (keepSet) setup.setId else null, setName = if (keepSet) setup.setName else null))
             }
         }
-        Text(
-            if (finish == ScanFinish.MIXED) "Cards that come in several finishes will ask which one you have."
-            else "Cards that come in several finishes are added as ${finish.label} without asking.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    }
+}
 
-        Text("Language", style = MaterialTheme.typography.labelLarge)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = language == null, onClick = { language = null; set = null }, label = { Text("Any") })
-            listOf(Language.ENGLISH, Language.JAPANESE, Language.CHINESE_SIMPLIFIED).forEach { l ->
-                FilterChip(
-                    selected = language == l,
-                    onClick = {
-                        language = l
-                        if (set != null && recentSets.none { it.first == l && it.second == set!!.first }) set = null
-                    },
-                    label = { Text(l.chipLabel) },
+/** The whole top edge is one wide hump: it reaches both edges and peaks in the centre. */
+private fun humpShape(humpPx: Float): androidx.compose.ui.graphics.Shape =
+    androidx.compose.foundation.shape.GenericShape { size, _ ->
+        val w = size.width
+        val h = size.height
+        moveTo(0f, humpPx)
+        cubicTo(w * 0.25f, 0f, w * 0.75f, 0f, w, humpPx)
+        lineTo(w, h)
+        lineTo(0f, h)
+        close()
+    }
+
+/** A hairline divider between toolbar buttons (the Row aligns it to the bottom). */
+@Composable
+private fun ToolbarDivider() {
+    Box(Modifier.width(1.dp).height(30.dp).background(Color.White.copy(alpha = 0.18f)))
+}
+
+/** A flat tap-to-open setting on the toolbar. [center] (Set) is emphasised. */
+@Composable
+private fun <T> ToolbarButton(
+    label: String,
+    value: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    modifier: Modifier = Modifier,
+    center: Boolean = false,
+    onSelect: (T) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { open = true }.padding(horizontal = 6.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                label.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (center) Palette.accent else Palette.text2,
+                maxLines = 1,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    value,
+                    color = Palette.text,
+                    style = if (center) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (center) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = if (center) Palette.accent else Palette.text2, modifier = Modifier.size(18.dp))
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEach { (v, t) ->
+                DropdownMenuItem(
+                    text = { Text(t) },
+                    onClick = { open = false; onSelect(v) },
+                    trailingIcon = { if (v == selected) Icon(Icons.Filled.Check, contentDescription = null, tint = Palette.accent) },
                 )
             }
         }
-
-        Text("Set", style = MaterialTheme.typography.labelLarge)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = set == null, onClick = { set = null }, label = { Text("Any set") })
-            recentSets.filter { language == null || it.first == language }.take(8).forEach { (l, id, name) ->
-                FilterChip(
-                    selected = set?.first == id,
-                    onClick = {
-                        set = id to name
-                        language = l
-                    },
-                    label = { Text(name) },
-                )
-            }
-        }
-        Text(
-            if (set == null) "Picking the set you're sorting makes scanning faster: only the card number has to be read."
-            else "Only ${set!!.second} will be matched.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Button(
-            onClick = { onStart(ScanSetup(finish, language, set?.first, set?.second)) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Start scanning") }
     }
 }
 
@@ -725,7 +909,7 @@ private fun AddedBanner(
         "Next card is picked up automatically. Same card again? Move it out of view for a second and " +
             "bring it back, or tap +1.",
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = Palette.text2,
     )
 }
 

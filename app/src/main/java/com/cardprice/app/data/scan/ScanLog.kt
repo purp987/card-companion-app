@@ -20,8 +20,11 @@ object ScanLog {
     private val time = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     @Volatile private var file: File? = null
 
-    /** Also told about every line (the beta's live viewer listens here). */
-    @Volatile var listener: ((warning: Boolean, message: String) -> Unit)? = null
+    /** Told about every line as it's written (the beta's live viewer and the server log uploader listen here). */
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(warning: Boolean, message: String) -> Unit>()
+
+    fun addListener(listener: (warning: Boolean, message: String) -> Unit) { listeners.addIfAbsent(listener) }
+    fun removeListener(listener: (warning: Boolean, message: String) -> Unit) { listeners.remove(listener) }
 
     /** Call once with the app's files directory; until then lines only go to Logcat. */
     fun init(filesDir: File) {
@@ -56,7 +59,7 @@ object ScanLog {
 
     private fun write(level: String, message: String) {
         if (level == "W") Log.w(TAG, message) else Log.d(TAG, message)
-        listener?.let { runCatching { it(level == "W", message) } }
+        for (l in listeners) runCatching { l(level == "W", message) }
         val target = file ?: return
         val line = "${time.format(Date())} $level [${Thread.currentThread().name}] $message\n"
         writer.execute {

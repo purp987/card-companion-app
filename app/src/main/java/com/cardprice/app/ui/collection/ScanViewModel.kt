@@ -129,6 +129,9 @@ data class BulkAdded(val added: List<BulkSlot>, val event: Long)
 /** A copy added by hand from a scan result (tapping a version), for the "Added" splash. */
 data class ManualAdded(val result: ScanResult, val variantKey: String, val event: Long)
 
+/** How many copies (net) this scanning session added, and their market value where known. */
+data class SessionStats(val cards: Int = 0, val value: Double = 0.0)
+
 class ScanViewModel(application: Application) : AndroidViewModel(application) {
     private val store = CollectionStore(application)
     private val resolver = ScanResolver(store)
@@ -147,8 +150,12 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     /** What's being scanned; pre-filled with last time's choices. */
     private val _setup = MutableStateFlow(setupStore.load() ?: ScanSetup())
     val setup: StateFlow<ScanSetup> = _setup.asStateFlow()
-    /** The "What are you scanning?" panel shows first; no frames are read until it's confirmed. */
-    private val _choosing = MutableStateFlow(true)
+    /**
+     * Scanning now starts right away with the last-used settings (seamless); the settings live in a
+     * bottom toolbar and are changed on the fly via [startScanning]. Kept as a flag so the camera can
+     * still be told to pause reading if ever needed.
+     */
+    private val _choosing = MutableStateFlow(false)
     val choosing: StateFlow<Boolean> = _choosing.asStateFlow()
 
     private val _mode = MutableStateFlow(ScanMode.SINGLE)
@@ -229,6 +236,10 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _manualAdded = MutableStateFlow<ManualAdded?>(null)
     val manualAdded: StateFlow<ManualAdded?> = _manualAdded.asStateFlow()
+
+    /** Net copies added and their market value since the scanner was opened, for the on-screen session tally. */
+    private val _session = MutableStateFlow(SessionStats())
+    val session: StateFlow<SessionStats> = _session.asStateFlow()
 
     fun setMode(mode: ScanMode) {
         ScanLog.d("mode $mode")
@@ -372,6 +383,15 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         if (delta == 0) return
         val t = target(result)
         changes.trySend { sync.change(t, variantKey, delta) }
+        bumpSession(result, variantKey, delta)
+    }
+
+    /** Running tally of what this scanning session added (net of undos). Value uses the market price if known. */
+    private fun bumpSession(result: ScanResult, variantKey: String, delta: Int) {
+        val unit = _prices.value[result.card.id]?.byVariant?.get(variantKey)?.amount ?: 0.0
+        _session.update {
+            SessionStats(cards = (it.cards + delta).coerceAtLeast(0), value = (it.value + delta * unit).coerceAtLeast(0.0))
+        }
     }
 
     /** Tap-to-add / hold-to-remove on a result: sets the owned count of one version. */
@@ -529,6 +549,8 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         ScanLog.d("scanner closed")
+        // Beta only: push whatever the scanner logged this session to the server now, while leaving it.
+        if (com.cardprice.app.BuildConfig.SCAN_LOG_UPLOAD) com.cardprice.app.data.scan.ScanLogUploader.flush()
         super.onCleared()
     }
 

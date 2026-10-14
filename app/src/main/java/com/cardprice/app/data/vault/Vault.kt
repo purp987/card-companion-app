@@ -6,6 +6,7 @@ import android.net.Network
 import android.os.Build
 import android.provider.Settings
 import com.cardprice.app.data.SecretStore
+import com.cardprice.app.data.scan.ScanLogUploader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +19,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.time.LocalDate
+
+/** How often the beta build flushes the scanner log to the server. */
+private const val SCAN_LOG_FLUSH_MS = 20_000L
 
 /** Where the app stands with its server, for the status dot and Settings. */
 sealed interface Connection {
@@ -178,10 +182,43 @@ object Vault {
             cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     scope.launch { flush() }
+                    if (com.cardprice.app.BuildConfig.SCAN_LOG_UPLOAD) scope.launch { ScanLogUploader.flush() }
                 }
             })
         }
+        startScanLogUpload(app)
         refresh()
+    }
+
+    /**
+     * Beta only: forward the scanner's log to the server so detection problems can be looked into. Flushes
+     * on a timer; the scanner also flushes when it closes. Release builds never do this (gated at build time).
+     */
+    private fun startScanLogUpload(app: Context) {
+        if (!com.cardprice.app.BuildConfig.SCAN_LOG_UPLOAD) return
+        val info = ScanLogUploader.deviceInfo(
+            manufacturer = Build.MANUFACTURER ?: "",
+            model = Build.MODEL ?: "",
+            android = Build.VERSION.RELEASE ?: "",
+            appVersion = runCatching {
+                val pi = app.packageManager.getPackageInfo(app.packageName, 0)
+                pi.versionName ?: ""
+            }.getOrDefault(""),
+            appVersionCode = runCatching {
+                val pi = app.packageManager.getPackageInfo(app.packageName, 0)
+                if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+            }.getOrDefault(0L),
+        )
+        ScanLogUploader.start(app.filesDir, info) { session, device, events ->
+            // Blocks on the uploader's own thread; throwing on failure keeps the batch queued for retry.
+            api.scanLog(ScanLogUploader.body(session, device, events).toString())
+        }
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(SCAN_LOG_FLUSH_MS)
+                if (!settings.token.isNullOrBlank()) runCatching { ScanLogUploader.flush() }
+            }
+        }
     }
 
     /**
