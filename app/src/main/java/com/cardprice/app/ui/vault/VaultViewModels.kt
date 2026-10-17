@@ -294,9 +294,22 @@ class ProductViewModel(application: Application, private val productId: Long) : 
 
     fun saveHolding(id: Long?, input: HoldingInput) {
         viewModelScope.launch {
+            val sealed = (_detail.value as? Load.Ready)?.value?.product?.isSealed == true
             val err = act { if (id == null) Vault.api.addHolding(input) else Vault.api.updateHolding(id, input) }
-            _message.value = err ?: if (id == null) "Added to your collection" else "Saved"
-            if (err == null) { Vault.holdingsChanged(); refreshHoldings() }
+            if (err != null) {
+                _message.value = err
+                return@launch
+            }
+            Vault.holdingsChanged()
+            // Owning it takes it off the Chase List / Shrink Wrap Watch on the server, so say so once the
+            // re-read confirms the star went out (rather than two snackbars in a row).
+            val unwatched = refreshHoldings()
+            val list = if (sealed) "Shrink Wrap Watch" else "Chase List"
+            _message.value = when {
+                id != null -> "Saved"
+                unwatched -> "Added to your collection · off your $list"
+                else -> "Added to your collection"
+            }
         }
     }
 
@@ -317,12 +330,13 @@ class ProductViewModel(application: Application, private val productId: Long) : 
         }
     }
 
-    private suspend fun refreshHoldings() {
-        val d = (_detail.value as? Load.Ready)?.value ?: return
-        (load { Vault.api.product(productId) } as? Load.Ready)?.value?.let { fresh ->
-            val current = (_detail.value as? Load.Ready)?.value ?: d
-            _detail.value = Load.Ready(current.copy(holdings = fresh.holdings, watched = fresh.watched))
-        }
+    /** Re-reads the holdings and the star. True when the product just came off a watchlist. */
+    private suspend fun refreshHoldings(): Boolean {
+        val d = (_detail.value as? Load.Ready)?.value ?: return false
+        val fresh = (load { Vault.api.product(productId) } as? Load.Ready)?.value ?: return false
+        val current = (_detail.value as? Load.Ready)?.value ?: d
+        _detail.value = Load.Ready(current.copy(holdings = fresh.holdings, watched = fresh.watched))
+        return d.watched && !fresh.watched
     }
 
     fun clearMessage() { _message.value = null }
@@ -341,6 +355,9 @@ class PortfolioViewModel : ViewModel() {
     val range: StateFlow<PriceRange> = _range.asStateFlow()
     private val _history = MutableStateFlow<Load<List<PricePoint>>>(Load.Loading)
     val history: StateFlow<Load<List<PricePoint>>> = _history.asStateFlow()
+    /** Movers / set completion / milestones for the fun overview; null until loaded (older servers stay null). */
+    private val _extras = MutableStateFlow<com.cardprice.app.data.vault.PortfolioFun?>(null)
+    val extras: StateFlow<com.cardprice.app.data.vault.PortfolioFun?> = _extras.asStateFlow()
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -391,6 +408,8 @@ class PortfolioViewModel : ViewModel() {
                 _stale.value = true
             }
             loadHistory(quiet)
+            // Fun extras are best-effort: an older server (no endpoint) just leaves the sections out.
+            _extras.value = runCatching { withContext(Dispatchers.IO) { Vault.api.portfolioFun(_pid.value) } }.getOrNull()
             _refreshing.value = false
         }
     }
@@ -445,6 +464,8 @@ class PortfolioViewModel : ViewModel() {
     }
 
     fun clearMessage() { _message.value = null }
+    /** Shows a celebratory message (snackbar) for a milestone. */
+    fun celebrate(msg: String) { _message.value = msg }
 }
 
 // ---------------------------------------------------------------- watchlists

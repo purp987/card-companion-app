@@ -174,9 +174,25 @@ data class Holding(
     val unitValue: Double?,
     val value: Double?,
     val cost: Double?,
+    val rarity: String? = null,
 )
 
 data class Bucket(val count: Int, val value: Double)
+
+// ---- "fun" portfolio extras (GET /api/portfolio/fun): movers, set completion, milestones ----
+data class Mover(
+    val productId: Long, val name: String, val imageUrl: String?, val number: String?,
+    val setName: String?, val rarity: String?, val isSealed: Boolean,
+    val value: Double, val changeAbs: Double, val changePct: Double?,
+)
+data class NextCard(val id: Long, val number: String?, val name: String, val imageUrl: String?)
+data class SetCompletion(val groupId: Long, val setName: String, val owned: Int, val total: Int, val pct: Double, val next: NextCard?)
+data class CompletedSet(val groupId: Long, val setName: String)
+data class Milestones(val ath: Double, val athIsNew: Boolean, val topCard: Mover?, val completedSets: List<CompletedSet>)
+data class PortfolioFun(
+    val value: Double, val prevValue: Double, val dayChange: Double, val dayChangePct: Double?,
+    val movers: List<Mover>, val sets: List<SetCompletion>, val milestones: Milestones,
+)
 
 data class PortfolioSummary(val value: Double, val cost: Double, val costCoveredValue: Double, val items: Int) {
     /** Unrealized gain on holdings that have a purchase price; null when none do. */

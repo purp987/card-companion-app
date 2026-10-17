@@ -74,6 +74,7 @@ fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
     val view by vm.view.collectAsState()
     val range by vm.range.collectAsState()
     val history by vm.history.collectAsState()
+    val extras by vm.extras.collectAsState()
     val message by vm.message.collectAsState()
     val refreshing by vm.refreshing.collectAsState()
     val loadedAt by vm.loadedAt.collectAsState()
@@ -85,6 +86,8 @@ fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
     var editing by remember { mutableStateOf<Holding?>(null) }
     var deleting by remember { mutableStateOf<Holding?>(null) }
     val snackbar = remember { SnackbarHostState() }
+    var confetti by remember { mutableStateOf(0) }
+    var celebratedSets by remember { mutableStateOf<Set<Long>>(emptySet()) }
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.clearMessage() } }
 
     VaultBackground {
@@ -122,9 +125,11 @@ fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
                         if (data.holdings.isEmpty()) {
                             item { MessageBox("Your collection is empty", "Scan cards, or find a card or sealed product and press Add to collection.") }
                         } else if (tab == "overview") {
-                            item { ValueCard(data, portfolios.firstOrNull { it.id == pid }?.name ?: "All portfolios", history, range, vm::setRange) }
+                            item { ValueCard(data, portfolios.firstOrNull { it.id == pid }?.name ?: "All portfolios", history, range, vm::setRange, extras?.dayChange, extras?.dayChangePct) }
                             item { VaultBreakdown(data) }
                             item { CrownJewels(data.holdings, onOpenProduct) }
+                            extras?.takeIf { it.movers.isNotEmpty() }?.let { f -> item { MoversStrip(f.movers, onOpenProduct) } }
+                            extras?.takeIf { it.sets.isNotEmpty() }?.let { f -> item { SetCompletionCard(f.sets, onOpenProduct) } }
                         } else {
                             item(key = "sort", contentType = "sort") {
                                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -147,6 +152,22 @@ fun PortfolioScreen(onOpenProduct: (Long) -> Unit) {
             }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+        ConfettiOverlay(confetti)
+    }
+
+    // Celebrate a new all-time-high or a newly completed set (once each).
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    LaunchedEffect(extras) {
+        val f = extras ?: return@LaunchedEffect
+        val seen = celebratedSets
+        var fire = f.milestones.athIsNew
+        val newDone = f.milestones.completedSets.filter { it.groupId !in seen }
+        if (newDone.isNotEmpty()) { fire = true; celebratedSets = seen + newDone.map { it.groupId } }
+        if (fire) {
+            confetti++
+            haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+            vm.celebrate(if (f.milestones.athIsNew) "All-time high! ${f.milestones.ath.usd()} 🎉" else "Set complete: ${newDone.first().setName}! 🎉")
+        }
     }
 
     editing?.let { h ->
@@ -206,11 +227,17 @@ private fun PortfolioPicker(options: List<Pair<Long, String>>, selected: Long?, 
 }
 
 @Composable
-private fun ValueCard(data: PortfolioView, name: String, history: Load<List<PricePoint>>, range: PriceRange, onRange: (PriceRange) -> Unit) {
+private fun ValueCard(data: PortfolioView, name: String, history: Load<List<PricePoint>>, range: PriceRange, onRange: (PriceRange) -> Unit, day: Double? = null, dayPct: Double? = null) {
     val s = data.summary
     GlassCard(Modifier.fillMaxWidth()) {
-        Text("$name · ${s.items} item${if (s.items == 1) "" else "s"}", style = MaterialTheme.typography.labelLarge, color = Palette.text2)
-        Text(s.value.usd(), style = PriceStyle, fontSize = 36.sp, color = Palette.text)
+        Row(verticalAlignment = Alignment.Top) {
+            Text("$name · ${s.items} item${if (s.items == 1) "" else "s"}", style = MaterialTheme.typography.labelLarge, color = Palette.text2, modifier = Modifier.weight(1f))
+            if (day != null && kotlin.math.abs(day) >= 0.005) DeltaChip(day, dayPct)
+        }
+        // The hero value counts up on first show.
+        val shown = remember { androidx.compose.animation.core.Animatable(0f) }
+        LaunchedEffect(s.value) { shown.animateTo(s.value.toFloat(), androidx.compose.animation.core.tween(900)) }
+        Text(shown.value.toDouble().usd(), style = PriceStyle, fontSize = 36.sp, color = Palette.text)
         val series = (history as? Load.Ready)?.value.orEmpty()
         if (series.size > 1) {
             val diff = series.last().value - series.first().value
@@ -273,10 +300,104 @@ private fun VaultBreakdown(data: PortfolioView) {
 }
 
 @Composable
+private fun DeltaChip(day: Double, pct: Double?) {
+    val up = day > 0
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp)).background(if (up) Palette.up.copy(alpha = 0.14f) else Palette.down.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 3.dp),
+    ) {
+        Text(
+            "${if (up) "▲" else "▼"} ${kotlin.math.abs(day).usd()}${pct?.let { " (${"%.1f".format(it * 100)}%)" } ?: ""} today",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (up) Palette.up else Palette.down,
+        )
+    }
+}
+
+@Composable
 private fun CrownJewels(holdings: List<Holding>, onOpenProduct: (Long) -> Unit) {
+    val top = remember(holdings) { holdings.sortedByDescending { it.value ?: 0.0 }.take(4) }
     GlassCard(Modifier.fillMaxWidth()) {
-        CardTitle("Crown Jewels")
-        holdings.sortedByDescending { it.value ?: 0.0 }.take(5).forEach { h -> HoldingRow(h, { onOpenProduct(h.productId) }) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CardTitle("Crown Jewels")
+            Text("  tap to flip", style = MaterialTheme.typography.bodySmall, color = Palette.text3)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
+            top.forEach { h ->
+                HoloCard(h.productId, h.imageUrl, h.isSealed, h.rarity, Modifier.weight(1f), back = {
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
+                        Text(h.name.orEmpty(), style = MaterialTheme.typography.labelMedium, color = Palette.text, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Text(h.setName.orEmpty(), style = MaterialTheme.typography.bodySmall, color = Palette.text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text((h.value ?: 0.0).usd(), style = MaterialTheme.typography.labelLarge, color = Palette.accent, modifier = Modifier.padding(top = 2.dp))
+                        TextButton(onClick = { onOpenProduct(h.productId) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("View", color = Palette.accent, style = MaterialTheme.typography.bodySmall) }
+                    }
+                })
+            }
+            repeat(4 - top.size) { Box(Modifier.weight(1f)) }
+        }
+    }
+}
+
+@Composable
+private fun MoversStrip(movers: List<com.cardprice.app.data.vault.Mover>, onOpenProduct: (Long) -> Unit) {
+    GlassCard(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CardTitle("Today's Highlights")
+            Text("  biggest movers", style = MaterialTheme.typography.bodySmall, color = Palette.text3)
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            movers.forEach { m ->
+                Column(Modifier.width(92.dp).clickable { onOpenProduct(m.productId) }) {
+                    HoloCard(m.productId, m.imageUrl, m.isSealed, m.rarity, Modifier.fillMaxWidth())
+                    Text(m.name, style = MaterialTheme.typography.bodySmall, color = Palette.text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+                    Text("${if (m.changeAbs >= 0) "+" else "-"}${kotlin.math.abs(m.changeAbs).usd()}", style = MaterialTheme.typography.labelMedium, color = if (m.changeAbs >= 0) Palette.up else Palette.down)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetCompletionCard(sets: List<com.cardprice.app.data.vault.SetCompletion>, onOpenProduct: (Long) -> Unit) {
+    GlassCard(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CardTitle("Set Completion")
+            val done = sets.count { it.pct >= 1.0 }
+            if (done > 0) Text("  $done complete", style = MaterialTheme.typography.bodySmall, color = Palette.accent)
+        }
+        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            sets.forEach { x ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(if (x.pct >= 1.0) Palette.accentSoft else Palette.surface2)
+                        .clickable(enabled = x.next != null) { x.next?.let { onOpenProduct(it.id) } }
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CompletionRing(x.pct)
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(x.setName, style = MaterialTheme.typography.labelLarge, color = Palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${x.owned} / ${x.total} cards", style = MaterialTheme.typography.bodySmall, color = Palette.text3)
+                        if (x.pct >= 1.0) Text("✓ Complete!", style = MaterialTheme.typography.bodySmall, color = Palette.accent)
+                        else x.next?.let { Text("Next: ${it.name}", style = MaterialTheme.typography.bodySmall, color = Palette.text2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompletionRing(pct: Double) {
+    val anim = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(pct) { anim.animateTo(pct.toFloat().coerceIn(0f, 1f), androidx.compose.animation.core.tween(900)) }
+    val color = if (pct >= 1.0) Palette.accent else Palette.accent2
+    Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(50.dp)) {
+            val sw = 5.dp.toPx()
+            drawArc(Palette.borderStrong, -90f, 360f, false, style = androidx.compose.ui.graphics.drawscope.Stroke(sw, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+            drawArc(color, -90f, 360f * anim.value, false, style = androidx.compose.ui.graphics.drawscope.Stroke(sw, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        }
+        Text("${(pct * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = Palette.text)
     }
 }
 

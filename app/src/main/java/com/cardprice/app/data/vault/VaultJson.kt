@@ -218,6 +218,33 @@ internal object VaultJson {
 
     fun portfolioHistory(json: String): List<PricePoint> = points(JSONObject(json).optJSONArray("series"))
 
+    fun portfolioFun(json: String): PortfolioFun {
+        val o = JSONObject(json)
+        fun mover(m: JSONObject) = Mover(
+            productId = m.lng("product_id") ?: 0, name = m.str("name") ?: "", imageUrl = m.str("image_url"),
+            number = m.str("number"), setName = m.str("set_name"), rarity = m.str("rarity"), isSealed = m.bool("is_sealed"),
+            value = m.dbl("value") ?: 0.0, changeAbs = m.dbl("change_abs") ?: 0.0, changePct = m.dbl("change_pct"),
+        )
+        val ms = o.optJSONObject("milestones") ?: JSONObject()
+        return PortfolioFun(
+            value = o.dbl("value") ?: 0.0, prevValue = o.dbl("prevValue") ?: 0.0,
+            dayChange = o.dbl("dayChange") ?: 0.0, dayChangePct = o.dbl("dayChangePct"),
+            movers = o.optJSONArray("movers").list { mover(it) },
+            sets = o.optJSONArray("sets").list { s ->
+                SetCompletion(
+                    groupId = s.lng("group_id") ?: return@list null, setName = s.str("set_name") ?: "",
+                    owned = s.int("owned") ?: 0, total = s.int("total") ?: 0, pct = s.dbl("pct") ?: 0.0,
+                    next = s.optJSONObject("next")?.let { NextCard(it.lng("id") ?: 0, it.str("number"), it.str("name") ?: "", it.str("image_url")) },
+                )
+            },
+            milestones = Milestones(
+                ath = ms.dbl("ath") ?: 0.0, athIsNew = ms.bool("athIsNew"),
+                topCard = ms.optJSONObject("topCard")?.let { mover(it) },
+                completedSets = ms.optJSONArray("completedSets").list { c -> CompletedSet(c.lng("group_id") ?: return@list null, c.str("set_name") ?: "") },
+            ),
+        )
+    }
+
     fun watchlist(json: String): List<ProductItem> = JSONArray(json).list(::product)
 
     fun rates(json: String): Map<String, Double> {

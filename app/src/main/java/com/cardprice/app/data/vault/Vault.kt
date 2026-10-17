@@ -228,7 +228,11 @@ object Vault {
      */
     fun holdingsChanged() {
         if (syncJob?.isActive == true && !monitor.unsupported && monitor.last != null) syncNow()
-        else _holdingsVersion.update { it + 1 }
+        else {
+            _holdingsVersion.update { it + 1 }
+            // Adding a holding takes the product off a watchlist on the server, so refresh that too.
+            _watchlistVersion.update { it + 1 }
+        }
     }
 
     /** Any other change made here (watchlist star, portfolio rename): just ask the server sooner. */

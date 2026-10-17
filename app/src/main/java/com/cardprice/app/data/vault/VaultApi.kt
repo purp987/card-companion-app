@@ -223,6 +223,10 @@ class VaultApi(
     fun portfolioHistory(pid: Long?, range: PriceRange): List<PricePoint> =
         VaultJson.portfolioHistory(call("GET", "/api/portfolio/history" + query("pid" to pid, "range" to range.key)))
 
+    /** Movers, set completion and milestones for a fun portfolio view (GET /api/portfolio/fun). */
+    fun portfolioFun(pid: Long?): PortfolioFun =
+        VaultJson.portfolioFun(call("GET", "/api/portfolio/fun" + query("pid" to pid)))
+
     fun addHolding(h: HoldingInput): Long? = VaultJson.createdId(call("POST", "/api/holdings", VaultJson.holdingBody(h)))
 
     fun updateHolding(id: Long, h: HoldingInput) {
